@@ -1,0 +1,40 @@
+HELP.md
+target/
+bin
+bin/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**
+!**/src/test/**
+
+build/
+.project
+.classpath
+.settings/
+/.settings
+/**/.settings/
+/**/.mvn/
+.mvn/
+Thumbs.db
+mvnw
+mvnw.cmd
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+
+### VS Code ###
+.vscode/
+/bin/

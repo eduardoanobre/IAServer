@@ -24,7 +24,15 @@ public class IAService {
 	private final ChatgptService chatgptService;
 	private final GeminiService geminiService;
 
-	public String consultarIA(String apiKey, String mensagemUsuario, EnumIA ia) throws IAException {
+	/**
+	 * 
+	 * @param apiKey
+	 * @param mensagemUsuario
+	 * @param ia
+	 * @return
+	 * @throws IAException
+	 */
+	public String consultar(String apiKey, String mensagemUsuario, EnumIA ia) throws IAException {
 		if (ia == null) {
 			throw new IAException("Tipo de IA não informado.");
 		}
@@ -57,13 +65,13 @@ public class IAService {
 
 	public String resumirTexto(String apiKey, String texto, EnumIA ia) throws IAException {
 		String prompt = "Resuma o seguinte texto de forma clara e objetiva:\n\n" + texto;
-		return consultarIA(apiKey, prompt, ia);
+		return consultar(apiKey, prompt, ia);
 	}
 
 	public List<String> sugerirTarefas(String apiKey, String contextoProjeto, EnumIA ia) throws IAException {
 		String prompt = "Com base no contexto abaixo, liste 3 tarefas importantes para o projeto:\n\n"
 				+ contextoProjeto;
-		String resposta = consultarIA(apiKey, prompt, ia);
+		String resposta = consultar(apiKey, prompt, ia);
 		return Arrays.stream(resposta.split("\n")).map(String::trim).filter(l -> !l.isBlank()).toList();
 	}
 

@@ -16,66 +16,111 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>17</java.version>
+		<spring-cloud.version>2021.0.5</spring-cloud.version>
 	</properties>
 	<dependencies>
+
+		<!-- WebFlux for WebClient -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator</artifactId>
+			<artifactId>spring-boot-starter-webflux</artifactId>
 		</dependency>
+
+		<!-- Spring Cloud Stream + Kafka Binder -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-jpa</artifactId>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-stream-kafka</artifactId>
 		</dependency>
+
+		<!-- Resilience4j Circuit Breaker & Retry -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation</artifactId>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring-boot2</artifactId>
 		</dependency>
+
+		<!-- Micrometer for métricas -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-web</artifactId>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-core</artifactId>
 		</dependency>
+
+		<!-- Jackson JSON -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
 		</dependency>
+
+		<!-- Lombok (opcional, para reduzir boilerplate) -->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
 			<scope>provided</scope>
 		</dependency>
+
+		<!-- Spring Boot Test (já inclui JUnit Jupiter, Mockito, Hamcrest, etc.) -->
 		<dependency>
-			<groupId>com.knuddels</groupId>
-			<artifactId>jtokkit</artifactId>
-			<version>1.1.0</version>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
 		</dependency>
+
+		<!-- Test Binder para Spring Cloud Stream -->
 		<dependency>
-			<groupId>io.github.lambdua</groupId>
-			<artifactId>service</artifactId>
-			<version>0.22.1</version>
-		</dependency>		
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-stream-test-binder</artifactId>
+			<version>4.0.2</version>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- MockWebServer (para simular a API HTTP nos testes de integração) -->
+		<dependency>
+			<groupId>com.squareup.okhttp3</groupId>
+			<artifactId>mockwebserver</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+
 		<dependency>
 			<groupId>br.com.shared</groupId>
 			<artifactId>SharedProject</artifactId>
 			<version>1.0.0</version>
-		</dependency>		
+		</dependency>
 	</dependencies>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<build>
-    <sourceDirectory>src/main/java</sourceDirectory>
-    		<plugins>
+		<plugins>
+			<!-- Plugin do Spring Boot -->
 			<plugin>
-				<artifactId>maven-compiler-plugin</artifactId>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<skip>true</skip>
+				</configuration>
+			</plugin>
+			<!-- Plugin do Maven para executar testes -->
+			<plugin>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<includes>
+						<include>**/*Test.java</include>
+					</includes>
+				</configuration>
 			</plugin>
 		</plugins>
-	    <resources>
-			<resource>
-	            <directory>src/main/resources</directory>
-	            <includes>
-	                <include>**/*.*</include>
-	            </includes>
-	        </resource>
-	    </resources>
 	</build>
+
 	<repositories>
 		<repository>
 			<id>spring-snapshots</id>

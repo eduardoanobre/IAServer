@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: ia-processor
+  cloud:
+    stream:
+      bindings:
+        processIa-in-0:
+          destination: ia.requests
+          group: ia-processor
+        processIa-out-0:
+          destination: ia.responses
+      kafka:
+        binder:
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+ia:
+  openai:
+    url: ${OPENAI_URL:https://api.openai.com/v1/chat/completions}
+    key: ${OPENAI_KEY}
+    model: ${OPENAI_MODEL:gpt-4o-mini}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      iaClient:
+        registerHealthIndicator: true
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+  retry:
+    instances:
+      iaClientRetry:
+        maxAttempts: 3
+        waitDuration: 2s

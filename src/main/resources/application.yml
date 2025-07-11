@@ -13,12 +13,6 @@ spring:
         binder:
           brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
-ia:
-  openai:
-    url: ${OPENAI_URL:https://api.openai.com/v1/chat/completions}
-    key: ${OPENAI_KEY}
-    model: ${OPENAI_MODEL:gpt-4o-mini}
-
 resilience4j:
   circuitbreaker:
     instances:

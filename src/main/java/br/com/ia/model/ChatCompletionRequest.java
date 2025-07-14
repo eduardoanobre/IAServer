@@ -54,4 +54,9 @@ public class ChatCompletionRequest {
 	@JsonProperty("max_tokens")
 	private Integer maxTokens;
 
+	/**
+	 * id de assitant
+	 */
+	private String assistantId;
+
 }

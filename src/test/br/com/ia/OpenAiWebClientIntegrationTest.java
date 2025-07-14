@@ -57,7 +57,8 @@ class OpenAiWebClientIntegrationTest {
 		mockWebServer.enqueue(new MockResponse().setBody(jsonResponse).addHeader("Content-Type", "application/json"));
 
 		// Monta requisição
-		ChatCompletionRequest req = ChatCompletionRequest.builder().model(null) // para usar modelo default configurado
+		ChatCompletionRequest req = ChatCompletionRequest.builder().provider("openai").model("GPT-4o")
+				.apiKey("764736736473647364736")
 				.messages(Collections.singletonList(new ChatMessage("user", "Test prompt"))).temperature(0.5).build();
 
 		// Executa chamada

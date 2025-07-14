@@ -1,6 +1,7 @@
 package br.com.ia.services.client;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -18,7 +19,9 @@ import lombok.extern.slf4j.Slf4j;
 public class OpenAiClient implements IAClient {
 
     private final WebClient webClient;
-    private static final String URL = "https://api.openai.com/v1/chat/completions";
+    
+    @Value("${ia.openai.url}")
+    private String url;
 
     public OpenAiClient(WebClient.Builder builder) {
         this.webClient = builder.build();
@@ -28,7 +31,6 @@ public class OpenAiClient implements IAClient {
     @CircuitBreaker(name = "iaClient", fallbackMethod = "fallback")
     @Retry(name = "iaClientRetry")
     public String call(ChatCompletionRequest req) {
-        String url = URL;
         String key = req.getApiKey();
         
         if (key == null || req.getModel() == null) {

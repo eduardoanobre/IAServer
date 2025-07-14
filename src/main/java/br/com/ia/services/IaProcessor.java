@@ -1,6 +1,5 @@
 package br.com.ia.services;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -19,48 +18,41 @@ import br.com.ia.model.IaResponse;
 @Component
 public class IaProcessor {
 
-	private final IAClient openaiClient;
+	private final IAClient iaClient;
 
-	public IaProcessor(@Qualifier("openai") IAClient openaiClient) {
-		this.openaiClient = openaiClient;
+	public IaProcessor(@Qualifier("router") IAClient iaClient) {
+		this.iaClient = iaClient;
 	}
 
 	@Bean
 	public Function<Message<IaRequest>, Message<IaResponse>> processIa() {
         return message -> {
-            IaRequest req = message.getPayload();
+			IaRequest req = message.getPayload();
 
-            // Extrai configurações do payload
-            Map<String, Object> opts = req.getOptions() != null ? req.getOptions() : Collections.emptyMap();
-            String apiKeyOverride = opts.containsKey("api_key")
-                ? opts.get("api_key").toString()
-                : null;
-            String modelOverride = opts.containsKey("model")
-                ? opts.get("model").toString()
-                : null;
-            Double temperature = opts.containsKey("temperature")
-                ? Double.parseDouble(opts.get("temperature").toString())
-                : null;
-            Integer maxTokens = opts.containsKey("max_tokens")
-                ? (Integer) opts.get("max_tokens")
-                : null;
+			// Monta request para IA
+			Map<String, Object> opts = req.getOptions() != null ? req.getOptions() : Map.of();
+			String apiKey = (String) opts.getOrDefault("api_key", null);
+			String model = (String) opts.getOrDefault("model", null);
+			String assistantId = (String) opts.getOrDefault("assistantId", null);
+			Double temperature = opts.containsKey("temperature") ? Double.valueOf(opts.get("temperature").toString()) : null;
+			Integer maxTokens = opts.containsKey("max_tokens") ? Integer.valueOf(opts.get("max_tokens").toString()) : null;
 
-            // Monta o request para a IA
-            ChatCompletionRequest chatReq = ChatCompletionRequest.builder()
-                .apiKey(apiKeyOverride)
-                .model(modelOverride)
-                .messages(List.of(new ChatMessage("user", req.getPrompt())))
-                .temperature(temperature)
-                .maxTokens(maxTokens)
-                .build();
+			var chatReq = ChatCompletionRequest.builder()
+				.apiKey(apiKey)
+				.model(model)
+				.assistantId(assistantId)
+				.provider(req.getProvider()) 
+				.messages(List.of(new ChatMessage("user", req.getPrompt())))
+				.temperature(temperature)
+				.maxTokens(maxTokens)
+				.build();
 
-            // Chama o client e empacota a resposta
-            String content = openaiClient.call(chatReq);
-            IaResponse response = new IaResponse(req.getCorrelationId(), content);
+			String resposta = iaClient.call(chatReq);
 
-            return MessageBuilder.withPayload(response)
-                .setHeader("correlationId", req.getCorrelationId())
-                .build();
+			return MessageBuilder
+				.withPayload(new IaResponse(req.getCorrelationId(), resposta))
+				.setHeader("correlationId", req.getCorrelationId())
+				.build();
         };
 	}
 }

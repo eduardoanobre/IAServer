@@ -18,5 +18,5 @@ public class IaResponse {
 	private String correlationId;
 
 	/** Conteúdo retornado pela IA */
-	private String content;
+	private String resposta;
 }

@@ -1,17 +1,31 @@
 spring:
   application:
     name: ia-processor
+
   cloud:
+    function:
+      definition: processIa
+
     stream:
       bindings:
         processIa-in-0:
           destination: ia.requests
           group: ia-processor
+          content-type: application/json
+          consumer:
+            max-attempts: 3
+            enable-dlq: true
         processIa-out-0:
           destination: ia.responses
+          content-type: application/json
+
       kafka:
         binder:
-          brokers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+          brokers: ${KAFKA_BOOTSTRAP_SERVERS:192.168.10.116:9092}
+          auto-create-topics: true
+          configuration:
+            max.poll.records: 10
+            enable.auto.commit: false
 
 resilience4j:
   circuitbreaker:
@@ -22,8 +36,20 @@ resilience4j:
         minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
+
+      assistantsClient:
+        registerHealthIndicator: true
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+
   retry:
     instances:
       iaClientRetry:
+        maxAttempts: 3
+        waitDuration: 2s
+
+      assistantsClientRetry:
         maxAttempts: 3
         waitDuration: 2s

@@ -5,6 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import br.com.shared.model.enums.EnumIA;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,7 +25,7 @@ public class ChatCompletionRequest {
 	 * Provedor de IA: "openai", "gemini" etc. Se não informado, usa padrão
 	 * configurado.
 	 */
-	private String provider;
+	private EnumIA provider;
 
 	/**
 	 * Chave de API para override; se não informado, usa a configurada para o

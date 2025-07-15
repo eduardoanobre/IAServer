@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
@@ -14,18 +13,16 @@ import br.com.ia.model.ChatCompletionRequest;
 import br.com.ia.model.ChatMessage;
 import br.com.ia.model.IaRequest;
 import br.com.ia.model.IaResponse;
+import br.com.ia.services.client.IAIClient;
+import br.com.ia.services.client.assitants.OpenAiAssistantsClient;
+import br.com.ia.services.client.assitants.OpenAiClient;
 
 @Component
 public class IaProcessor {
 
-	private final IAClient iaClient;
-
-	public IaProcessor(@Qualifier("router") IAClient iaClient) {
-		this.iaClient = iaClient;
-	}
-
 	@Bean
 	public Function<Message<IaRequest>, Message<IaResponse>> processIa() {
+		
         return message -> {
 			IaRequest req = message.getPayload();
 
@@ -36,6 +33,15 @@ public class IaProcessor {
 			String assistantId = (String) opts.getOrDefault("assistantId", null);
 			Double temperature = opts.containsKey("temperature") ? Double.valueOf(opts.get("temperature").toString()) : null;
 			Integer maxTokens = opts.containsKey("max_tokens") ? Integer.valueOf(opts.get("max_tokens").toString()) : null;
+			
+			
+			IAIClient iaClient = null;
+			
+			switch (req.getProvider()) {
+			case CHATGPT -> iaClient = new OpenAiClient();
+			case CHATGPT_ASSISTANTS -> iaClient = new OpenAiAssistantsClient();
+			default -> throw new IllegalArgumentException("IA provider desconhecido");
+			}
 
 			var chatReq = ChatCompletionRequest.builder()
 				.apiKey(apiKey)

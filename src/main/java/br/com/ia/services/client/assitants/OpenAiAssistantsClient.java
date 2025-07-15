@@ -1,4 +1,4 @@
-package br.com.ia.services;
+package br.com.ia.services.client.assitants;
 
 import java.util.List;
 import java.util.Map;
@@ -9,20 +9,51 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import br.com.ia.model.ChatCompletionRequest;
+import br.com.ia.services.client.IAIClient;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
-public class OpenAiAssistantsClientImpl implements OpenAiAssistantsClient {
+public class OpenAiAssistantsClient  implements IAIClient {
 
 	private static final String JSON = "application/json";
 	private static final String BEARER = "Bearer ";
 	private static final String BASE_URL = "https://api.openai.com/v1";
+	
+	static WebClient webClient = WebClient.create(BASE_URL);
+	
+    @Override
+    @Retry(name = "assistantsClientRetry")
+    @CircuitBreaker(name = "assistantsClient", fallbackMethod = "fallbackAssistants")
+	public String call(ChatCompletionRequest req) {
+		String apiKey = req.getApiKey();
+		String assistantId = req.getAssistantId(); // precisa vir no request
+		String prompt = req.getMessages().get(req.getMessages().size() - 1).getContent();
 
-	private final WebClient webClient;
+		// Cria thread (ou futura lógica para reutilizar via idChat)
+		String threadId = createThread(apiKey);
 
-	public OpenAiAssistantsClientImpl(WebClient.Builder builder) {
-		this.webClient = builder.baseUrl(BASE_URL).build();
+		// Cria run
+		String runId = createRun(threadId, assistantId, prompt, apiKey);
+
+		// Poll até a conclusão
+		for (int i = 0; i < 20; i++) {
+			String status = getRunStatus(threadId, runId, apiKey);
+			if ("completed".equals(status)) break;
+			try {
+				Thread.sleep(1000);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		}
+
+		// Retorna a última resposta
+		return getLastResponse(threadId, apiKey);
 	}
 
-	@Override
 	public String createThread(String apiKey) {
 		var response = webClient.post()
 			.uri("/threads")
@@ -39,7 +70,6 @@ public class OpenAiAssistantsClientImpl implements OpenAiAssistantsClient {
 		return response.get("id").asText();
 	}
 
-	@Override
 	public String createRun(String threadId, String assistantId, String prompt, String apiKey) {
 		var body = Map.of(
 			"assistant_id", assistantId,
@@ -62,7 +92,6 @@ public class OpenAiAssistantsClientImpl implements OpenAiAssistantsClient {
 		return response.get("id").asText();
 	}
 
-	@Override
 	public String getRunStatus(String threadId, String runId, String apiKey) {
 		var response = webClient.get()
 			.uri("/threads/{threadId}/runs/{runId}", threadId, runId)
@@ -79,7 +108,6 @@ public class OpenAiAssistantsClientImpl implements OpenAiAssistantsClient {
 		return response.get("status").asText(); 
 	}
 
-	@Override
 	public String getLastResponse(String threadId, String apiKey) {
 		JsonNode response = webClient.get()
 				.uri("/threads/{threadId}/messages", threadId)
@@ -109,6 +137,11 @@ public class OpenAiAssistantsClientImpl implements OpenAiAssistantsClient {
 			}
 
 			return textNode.get("value").asText();
+	}
+	
+	public String fallbackAssistants(ChatCompletionRequest req, Throwable ex) {
+		log.error("Assistants API falhou, req={}:", req, ex);
+		return "Desculpe, estamos com instabilidade no Assistants. Tente novamente mais tarde.";
 	}
 }
 

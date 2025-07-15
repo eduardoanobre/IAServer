@@ -1,31 +1,21 @@
-package br.com.ia.services.client;
+package br.com.ia.services.client.assitants;
 
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import br.com.ia.model.ChatCompletionRequest;
 import br.com.ia.model.ChatCompletionResponse;
-import br.com.ia.services.IAClient;
+import br.com.ia.services.client.IAIClient;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
-@Qualifier("openai")
-public class OpenAiClient implements IAClient {
+public class OpenAiClient implements IAIClient {
 
-    private final WebClient webClient;
-    
-    @Value("${ia.openai.url}")
-    private String url;
-
-    public OpenAiClient(WebClient.Builder builder) {
-        this.webClient = builder.build();
-    }
+	static WebClient webClient = WebClient.create();
 
     @Override
     @CircuitBreaker(name = "iaClient", fallbackMethod = "fallback")
@@ -38,7 +28,7 @@ public class OpenAiClient implements IAClient {
         }
         
         WebClient client = webClient.mutate()
-                .baseUrl(url)
+                .baseUrl("https://api.openai.com/v1/chat/completions")
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + key)
                 .build();
 

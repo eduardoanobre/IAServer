@@ -5,15 +5,12 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import br.com.shared.model.enums.EnumIA;
+import br.com.shared.model.enums.EnumModeloIA;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * DTO para requisição de chat completions via Kafka
- */
 @Builder
 @Data
 @NoArgsConstructor
@@ -21,43 +18,23 @@ import lombok.NoArgsConstructor;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ChatCompletionRequest {
 
-	/**
-	 * Provedor de IA: "openai", "gemini" etc. Se não informado, usa padrão
-	 * configurado.
-	 */
-	private EnumIA provider;
+	/** Modelo de IA a ser utilizado, com IA, nome e custos */
+	private EnumModeloIA modeloIA;
 
-	/**
-	 * Chave de API para override; se não informado, usa a configurada para o
-	 * provider.
-	 */
+	/** Chave da API, opcional (override) */
 	@JsonProperty("api_key")
 	private String apiKey;
 
-	/**
-	 * Modelo a ser utilizado; se não informado, usa padrão do provider.
-	 */
-	private String model;
-
-	/**
-	 * Mensagens no formato chat.
-	 */
+	/** Conversa no formato chat */
 	private List<ChatMessage> messages;
 
-	/**
-	 * Temperatura para sampling (0.0 a 2.0).
-	 */
+	/** Temperatura da resposta */
 	private Double temperature;
 
-	/**
-	 * Número máximo de tokens para geração.
-	 */
+	/** Limite de tokens */
 	@JsonProperty("max_tokens")
 	private Integer maxTokens;
 
-	/**
-	 * id de assitant
-	 */
+	/** Usado apenas para Assistants */
 	private String assistantId;
-
 }

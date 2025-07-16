@@ -4,7 +4,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-import br.com.shared.model.enums.EnumIA;
+import br.com.shared.model.enums.EnumModeloIA;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,12 +17,12 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class IaRequest {
-	
+
 	/** Identificador para correlação de requisição e resposta */
 	private String correlationId;
 
-	/** ENUM Provedor de IA a ser utilizado (ex: "openai", "gemini") */
-	private EnumIA provider;
+	/** Modelo de IA a ser utilizado (já inclui provedor e nome do modelo) */
+	private EnumModeloIA modeloIA;
 
 	/** Prompt de entrada para a chamada de IA */
 	private String prompt;

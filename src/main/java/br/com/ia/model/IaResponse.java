@@ -1,6 +1,10 @@
 package br.com.ia.model;
 
+import java.math.BigDecimal;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import br.com.shared.annotations.Comment;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,10 +17,16 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class IaResponse {
-	
-	/** Mesmo correlationId da requisição */
+
+	@Comment("Mesmo correlationId da requisição")
 	private String correlationId;
 
-	/** Conteúdo retornado pela IA */
+	@Comment("Conteúdo retornado pela IA")
 	private String resposta;
+
+	BigDecimal custo;
+	String modelo;
+
+	int tokensPrompt;
+	int tokensResposta;
 }

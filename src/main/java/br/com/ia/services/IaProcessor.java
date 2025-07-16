@@ -19,8 +19,8 @@ import br.com.ia.services.client.IAIClient;
 import br.com.ia.services.client.IaCallResult;
 import br.com.ia.services.client.assitants.OpenAiAssistantsClient;
 import br.com.ia.services.client.assitants.OpenAiClient;
+import br.com.ia.utils.OpenAICustoUtil;
 import br.com.shared.model.enums.EnumModeloIA;
-import br.com.shared.utils.ia.OpenAICustoUtil;
 
 @Component
 public class IaProcessor {

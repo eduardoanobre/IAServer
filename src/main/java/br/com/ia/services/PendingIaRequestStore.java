@@ -36,4 +36,8 @@ public class PendingIaRequestStore {
 	public void remove(String idChat) {
 		pending.remove(idChat);
 	}
+
+	public boolean exists(String idChat) {
+		return pending.containsKey(idChat);
+	}
 }

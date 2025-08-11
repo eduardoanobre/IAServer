@@ -13,8 +13,12 @@ spring:
           group: ia-processor
           content-type: application/json
           consumer:
-            max-attempts: 3
-            enable-dlq: true
+            maxAttempts: 5                 # inclui a 1ª entrega
+            backOffInitialInterval: 1000   # 1s
+            backOffMultiplier: 2.0         # 1s -> 2s -> 4s -> 8s -> 16s
+            backOffMaxInterval: 30000      # 30s máx entre tentativas
+            concurrency: 3                 # = nº de partições do tópico ia.requests
+
         processIa-out-0:
           destination: ia.responses
           content-type: application/json
@@ -27,6 +31,28 @@ spring:
             max.poll.records: 10
             enable.auto.commit: false
 
+        bindings:
+          # DLT para o consumer de requests
+          processIa-in-0:
+            consumer:
+              enableDlq: true
+              dlqName: ia.requests.DLT
+              configuration:
+                # aceitar mensagens maiores (ex.: até 5 MB)
+                max.partition.fetch.bytes: 5242880
+                fetch.max.bytes: 52428800
+
+          # Producer de respostas: idempotência + compressão
+          processIa-out-0:
+            producer:
+              configuration:
+                enable.idempotence: true
+                acks: all
+                max.in.flight.requests.per.connection: 5
+                linger.ms: 0
+                delivery.timeout.ms: 120000
+                compression.type: zstd
+
 resilience4j:
   circuitbreaker:
     instances:
@@ -36,7 +62,6 @@ resilience4j:
         minimumNumberOfCalls: 5
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
-
       assistantsClient:
         registerHealthIndicator: true
         slidingWindowSize: 20
@@ -49,7 +74,6 @@ resilience4j:
       iaClientRetry:
         maxAttempts: 3
         waitDuration: 2s
-
       assistantsClientRetry:
         maxAttempts: 3
         waitDuration: 2s

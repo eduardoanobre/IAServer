@@ -18,7 +18,7 @@ public class ResponsesRequest {
   private List<InputItem> input;       // blocos: input_text, input_image, input_file
   private String instructions;         // system/developer message
 
-  // (NOVO) Referência a template de prompt
+  // Referência a template de prompt
   private PromptRef prompt;            // id + (opcional) version + variables
 
   // Amostragem / limites
@@ -49,7 +49,7 @@ public class ResponsesRequest {
   private Truncation truncation;           // auto | disabled
   private Verbosity verbosity;             // low | medium | high
 
-  // (NOVO) Opções para modelos de raciocínio (o-series)
+  // Opções para modelos de raciocínio (o-series)
   private ReasoningOptions reasoning;      // ex.: effort = low|medium|high
 
   // Saídas estruturadas (JSON garantido)
@@ -81,7 +81,7 @@ public class ResponsesRequest {
 
   @Data @Builder @NoArgsConstructor @AllArgsConstructor
   public static class StreamOptions {
-    @JsonProperty("include_usage") private Boolean includeUsage; // add mais flags aqui se necessário
+    @JsonProperty("include_usage") private Boolean includeUsage;
   }
 
   @Data @Builder @NoArgsConstructor @AllArgsConstructor
@@ -93,6 +93,7 @@ public class ResponsesRequest {
   public static class ResponseFormat {
     private String type; // "text" | "json_schema"
     @JsonProperty("json_schema") private JsonSchema jsonSchema;
+    @JsonProperty("strict") private Boolean strict; 
   }
 
   @Data @Builder @NoArgsConstructor @AllArgsConstructor

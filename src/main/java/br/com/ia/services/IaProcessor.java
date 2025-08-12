@@ -11,9 +11,12 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+
 import br.com.ia.model.IaRequest;
 import br.com.ia.model.IaResponse;
 import br.com.ia.model.responses.ResponsesRequest;
+import br.com.ia.model.responses.ResponsesRequest.ResponsesRequestBuilder;
 import br.com.ia.model.responses.ResponsesResponse;
 import br.com.ia.services.client.responses.ResponsesClient;
 import br.com.ia.utils.OpenAICustoUtil;
@@ -23,8 +26,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class IaProcessor {
 
-  private static final String CHAT_ID = "chatId";
-  private final ResponsesClient responsesClient;
+	private static final double DEFAULT_TEMP = 0.3;
+	private static final String CHAT_ID = "chatId";
+	
+	private final ResponsesClient responsesClient;
+	private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
   @Bean
   public Function<Message<IaRequest>, Message<IaResponse>> processIa() { // NOSONAR
@@ -43,17 +49,20 @@ public class IaProcessor {
 
       try {
         if (req == null) throw new IllegalArgumentException("IaRequest nulo.");
-
-        // ---- Opções vindas do ERP ----
+        
         Map<String, Object> opts = req.getOptions() != null ? req.getOptions() : Map.of();
         
         String apiKey = (String) opts.getOrDefault("api_key", null);
         if (apiKey == null) throw new IllegalArgumentException("api_key ausente nas opções.");
         
-        Double temperature = opts.containsKey("temperature") ? Double.valueOf(String.valueOf(opts.get("temperature"))) : null;
+        Double temperature = normalizeTemperatureFromOpts(opts);
         Integer maxOutputTokens = opts.containsKey("max_output_tokens") ? Integer.valueOf(String.valueOf(opts.get("max_output_tokens"))) : null;
         String instructions = (String) opts.getOrDefault("instructions", null);
-        String model = (String) opts.getOrDefault("model", "gpt-5"); // padrão
+        String model = (String) opts.getOrDefault("model", "gpt-5");        
+        Boolean store = opts.containsKey("store") ? Boolean.valueOf(String.valueOf(opts.get("store"))) : null;
+	    Boolean background = opts.containsKey("background") ? Boolean.valueOf(String.valueOf(opts.get("background"))) : null;
+	    Boolean stream = opts.containsKey("stream") ? Boolean.valueOf(String.valueOf(opts.get("stream"))) : null;
+	    String promptCacheKey = (String) opts.get("prompt_cache_key");
 
         // ---- Monta ResponsesRequest (JSON schema vem do ERP) ----
         var input = List.of(
@@ -68,16 +77,77 @@ public class IaProcessor {
             .build()
         );
 
-        var responsesReq = ResponsesRequest.builder()
-          .model(model)
-          .instructions(instructions)
-          .input(input)
-          .temperature(temperature)
-          .maxOutputTokens(maxOutputTokens)
-          .metadata(Map.of(CHAT_ID, chatId))
-          .promptCacheKey(chatId)
-          .safetyIdentifier(chatId)
-          .build();
+        var builder = ResponsesRequest.builder()
+        	    .model(model)
+        	    .instructions(instructions)
+        	    .input(input)
+        	    .temperature(temperature)
+        	    .maxOutputTokens(maxOutputTokens)
+        	    .metadata(Map.of(CHAT_ID, chatId))
+        	    .promptCacheKey(promptCacheKey)
+        	    .safetyIdentifier(chatId)
+        	    .store(store)
+        	    .background(background)
+        	    .stream(stream);
+        
+        Object textRaw = opts.get("text");
+        if (textRaw != null) {
+          var textOpts = mapper.convertValue(textRaw, ResponsesRequest.TextOptions.class);
+          builder.text(textOpts);
+        }
+        
+        Object toolsRaw = opts.get("tools");
+        if (toolsRaw != null) {
+          java.util.List<ResponsesRequest.ToolDefinition> tools;
+
+          if (toolsRaw instanceof java.util.List<?>) {
+            tools = mapper.convertValue(
+                toolsRaw,
+                new TypeReference<java.util.List<ResponsesRequest.ToolDefinition>>() {}
+            );
+          } else if (toolsRaw instanceof java.util.Map<?,?>) {
+            // aceita também objeto único e empacota em lista
+            ResponsesRequest.ToolDefinition one = mapper.convertValue(
+                toolsRaw, ResponsesRequest.ToolDefinition.class
+            );
+            tools = java.util.List.of(one);
+          } else {
+            throw new IllegalArgumentException("options.tools deve ser array ou objeto");
+          }
+
+          builder.tools(tools);
+        }
+        
+        Object toolChoiceRaw = opts.get("tool_choice");
+        if (toolChoiceRaw != null) builder.toolChoice(toolChoiceRaw);
+
+        // (opcional) stream_options / include / reasoning / service_tier
+        Object streamOptionsRaw = opts.get("stream_options");
+        if (streamOptionsRaw != null) {
+          var so = mapper.convertValue(streamOptionsRaw, ResponsesRequest.StreamOptions.class);
+          builder.streamOptions(so);
+        }
+        
+        Object includeRaw = opts.get("include");
+        if (includeRaw != null) {
+          @SuppressWarnings("unchecked")
+          var inc = (List<String>) mapper.convertValue(includeRaw,
+              mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+          builder.include(inc);
+        }
+        
+        Object reasoningRaw = opts.get("reasoning");
+        if (reasoningRaw != null) {
+          var reasoning = mapper.convertValue(reasoningRaw, ResponsesRequest.ReasoningOptions.class);
+          builder.reasoning(reasoning);
+        }
+        
+        Object serviceTierRaw = opts.get("service_tier"); // "auto"|"default"|"flex"|"priority"
+        if (serviceTierRaw != null) {
+          obterServiceTier(builder, serviceTierRaw);
+        }
+        
+        var responsesReq = builder.build();
 
         // ---- Chama Responses API ----
         ResponsesResponse res = responsesClient.createResponse(apiKey, responsesReq);
@@ -135,11 +205,6 @@ public class IaProcessor {
     };
   }
 
-  private int getInt(Map<String, Object> usage, String key) {
-    if (usage == null || !usage.containsKey(key) || usage.get(key) == null) return 0;
-    return Integer.parseInt(String.valueOf(usage.get(key)));
-  }
-
     /**
      * Heurística simples para distinguir falhas transitórias (reprocessar) de falhas permanentes.
      * Ajuste conforme seu cliente/provedor real.
@@ -177,4 +242,52 @@ public class IaProcessor {
         }
         return false;
     }
+    
+	private void obterServiceTier(ResponsesRequestBuilder builder, Object serviceTierRaw) {
+		try {
+			var st = ResponsesRequest.ServiceTier.valueOf(("_" + serviceTierRaw).replace("default", "_default"));
+			builder.serviceTier(st);
+		} catch (IllegalArgumentException ignore) {
+			/* mantém null se inválido */ }
+	}
+
+	private int getInt(Map<String, Object> usage, String key) {
+		if (usage == null || !usage.containsKey(key) || usage.get(key) == null)
+			return 0;
+		return Integer.parseInt(String.valueOf(usage.get(key)));
+	}
+	
+	private static double normalizeTemperatureFromOpts(Map<String, Object> opts) {
+		final double def = DEFAULT_TEMP;
+		if (opts == null)
+			return def;
+
+		Object t = opts.get("temperature");
+		if (t == null)
+			return def;
+
+		double v;
+		if (t instanceof Number n) {
+			v = n.doubleValue();
+		} else {
+			try {
+				v = Double.parseDouble(String.valueOf(t).trim());
+			} catch (Exception e) {
+				return def; // inválido -> usa default
+			}
+		}
+
+		if (!Double.isFinite(v))
+			return def;
+
+		// clamp para 0..100
+		v = Math.max(0.0, Math.min(100.0, v));
+
+		// escala linear 0..100 -> 0..2
+		double scaled = (v / 100.0) * 2.0;
+
+		// arredonda para 3 casas para estabilidade
+		return Math.round(scaled * 1000.0) / 1000.0;
+	}
+
 }

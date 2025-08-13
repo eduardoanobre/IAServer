@@ -1,6 +1,6 @@
-// br.com.ia.sdk.context.ContextShardService.java
 package br.com.ia.sdk.context;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -74,4 +74,41 @@ public class ContextShardService {
 					Map.of("erro", "falha ao desserializar payload_json"));
 		}
 	}
+
+	/**
+	 * Carrega os shards mais recentes para cada tipo solicitado e converte para
+	 * {@link ContextShard} efêmero (pronto para envio).
+	 */
+	@Transactional(readOnly = true)
+	public List<ContextShard> loadShards(String chatId, String... types) {
+		var out = new ArrayList<ContextShard>();
+		for (String t : types) {
+			findLatest(chatId, t).ifPresent(e -> out
+					.add(ContextShards.ephemeral(e.getShardType(), e.getVersion(), e.isStable(), payloadMap(e))));
+		}
+		return out;
+	}
+
+	public Optional<ContextShardEntity> findLatest(String chatId, String type) {
+		return repo.findTopByChatIdAndTypeOrderByVersionDescIdDesc(chatId, type);
+	}
+
+	/** true se existe pelo menos um shard daquele tipo para o chat. */
+	@Transactional(readOnly = true)
+	public boolean exists(String chatId, String type) {
+		return findLatest(chatId, type).isPresent();
+	}
+
+	private Map<String, Object> payloadMap(ContextShardEntity e) {
+		String json = e.getPayloadJson();
+		if (json == null || json.isBlank())
+			return Map.of();
+		try {
+			return mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+			});
+		} catch (Exception ex) {
+			return Map.of("_raw", json, "_parse_error", ex.getMessage());
+		}
+	}
+
 }

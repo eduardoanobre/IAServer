@@ -3,7 +3,7 @@ package br.com.ia.sdk.context;
 import java.util.List;
 
 public interface ShardTracked {
-	
+
 	/** Nome lógico do shard (ex.: "projeto", "sprint", "tarefa", "campanha"). */
 	String shardType();
 
@@ -24,5 +24,11 @@ public interface ShardTracked {
 	String getShardFingerprint();
 
 	void setShardFingerprint(String fp);
-	
+
+	/**
+	 * para padronizar ContextShard da entidade
+	 * 
+	 */
+	ContextShard obterContexShars();
+
 }

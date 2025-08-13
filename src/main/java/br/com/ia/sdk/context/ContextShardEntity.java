@@ -1,4 +1,3 @@
-// src/main/java/br/com/ia/sdk/context/ContextShardEntity.java
 package br.com.ia.sdk.context;
 
 import java.time.Instant;
@@ -22,9 +21,9 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "ia_context_shard", 
-	uniqueConstraints = { @UniqueConstraint(name = "uk_shard_chat_type_ver", columnNames = { "chat_id", "shard_type", "version" }) }, 
-	indexes = { @Index(name = "idx_shard_chat_type", columnList = "chat_id, shard_type") })
+@Table(name = "ia_context_shard", uniqueConstraints = {
+		@UniqueConstraint(name = "uk_shard_chat_type_ver", columnNames = { "chat_id", "shard_type",
+				"version" }) }, indexes = { @Index(name = "idx_shard_chat_type", columnList = "chat_id, shard_type") })
 @Getter
 @Setter
 @NoArgsConstructor
@@ -32,32 +31,33 @@ import lombok.Setter;
 @Builder
 public class ContextShardEntity {
 
-	@Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-	  private Long id;
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	private Long id;
 
-	  @Column(name = "chat_id", nullable = false, length = 64)
-	  private String chatId;
+	@Column(name = "chat_id", nullable = false, length = 64)
+	private String chatId;
 
-	  @Column(name = "shard_type", nullable = false, length = 64)
-	  private String shardType;
+	@Column(name = "shard_type", nullable = false, length = 64)
+	private String shardType;
 
-	  @Column(name = "version", nullable = false)
-	  private int version;
+	@Column(name = "version", nullable = false)
+	private int version;
 
-	  @Column(name = "stable", nullable = false)
-	  private boolean stable;
+	@Column(name = "stable", nullable = false)
+	private boolean stable;
 
-	  /** JSON leve do payload */
-	  @Lob
-	  @Column(name = "payload_json", columnDefinition = "TEXT", nullable = false)
-	  private String payloadJson;
+	/** JSON leve do payload */
+	@Lob
+	@Column(name = "payload_json", columnDefinition = "TEXT", nullable = false)
+	private String payloadJson;
 
-	  @CreationTimestamp
-	  @Column(name = "created_at", updatable = false)
-	  private Instant createdAt;
+	@CreationTimestamp
+	@Column(name = "created_at", updatable = false)
+	private Instant createdAt;
 
-	  @UpdateTimestamp
-	  @Column(name = "updated_at")
-	  private Instant updatedAt;
+	@UpdateTimestamp
+	@Column(name = "updated_at")
+	private Instant updatedAt;
 
 }

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import br.com.ia.model.IaRequest;
 import br.com.ia.model.IaResponse;
 import br.com.ia.model.RequestProvider;
+import br.com.ia.sdk.context.CacheKeys;
 import br.com.ia.services.PendingIaRequestStore;
 import br.com.ia.utils.IAUtils;
 import br.com.shared.exception.IAException;
@@ -45,12 +46,11 @@ public class PromptExecutorImpl implements PromptExecutor {
 			throw new IAException("apiKey obrigatório");
 		if (isBlank(r.getModel()))
 			throw new IAException("model obrigatório");
-		int instrVer = (r.getVersaoInstrucao() != null ? r.getVersaoInstrucao() : 1);
-		int schemaVer = (r.getVersaoSchema() != null ? r.getVersaoSchema() : 1);
 
 		// monta options Responses API
 		Map<String, Object> opts = new HashMap<>();
 		opts.put("model", r.getModel());
+		
 		if (!isBlank(r.getInstructions()))
 			opts.put("instructions", r.getInstructions());
 		if (r.getText() != null)
@@ -62,13 +62,31 @@ public class PromptExecutorImpl implements PromptExecutor {
 		double temp = Temperature.fromPercent(r.getTemperaturePercent(), Temperature.DEFAULT);
 		opts.put("temperature", temp);
 
-		// cache key calculada: chatId + versaoInstrucao (fallback = 1)
-		String cacheKey = CacheKeys.forProjeto(r.getChatId(), instrVer, schemaVer);
-		opts.put("prompt_cache_key", cacheKey);
-
 		// segurança/telemetria
-		opts.put("safety_identifier", r.getChatId());
+		opts.put("safety_identifier", r.getChatId());	
+		
+		// dentro do PromptExecutorImpl, ao montar o opts para IaRequest:
+		if (r.getContextShards() != null && !r.getContextShards().isEmpty()) {
+		  var shardList = new java.util.ArrayList<java.util.Map<String,Object>>();
+		  for (var s : r.getContextShards()) {
+		    shardList.add(Map.of(
+		      "type", s.type(),
+		      "version", s.version(),
+		      "stable", s.stable(),
+		      "payload", s.payload()
+		    ));
+		  }
+		opts.put("context_shards", shardList);
+		}
 
+		String cacheKey = CacheKeys.forProjeto(
+			    r.getChatId(),
+			    r.getVersaoInstrucaoProjeto(),
+			    r.getVersaoSchema(),
+			    r.getCacheFacet()
+			);
+		opts.put("prompt_cache_key", cacheKey);		
+		
 		// constrói IaRequest, envia e aguarda
 		IaRequest iaReq = provider.getRequest(r.getPrompt(), r.getChatId(), r.getApiKey(), opts);
 

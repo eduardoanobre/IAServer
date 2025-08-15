@@ -17,6 +17,8 @@ public final class ContextShards {
 
 	public static final String TEXTO = "texto";
 	public static final String TITULO = "titulo";
+	public static final String VERSION = "version";
+	public static final String TYPE = "type";
 
 	/** Implementação imutável e leve de ContextShard. */
 	private record ShardImpl(String type, int version, boolean stable, Map<String, Object> payload)

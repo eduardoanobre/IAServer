@@ -11,6 +11,6 @@ public interface ContextShardRepository extends JpaRepository<ContextShardEntity
 	  List<ContextShardEntity> findByChatIdAndShardTypeIn(String chatId, List<String> types);
 	  List<ContextShardEntity> findByChatId(String chatId);
 	  Optional<ContextShardEntity> findTopByChatIdAndShardTypeOrderByVersionDesc(String chatId, String shardType);
-	  Optional<ContextShardEntity> findTopByChatIdAndTypeOrderByVersionDescIdDesc(String chatId, String type);
+	  Optional<ContextShardEntity> findTopByChatIdAndShardTypeOrderByVersionDescIdDesc(String chatId, String type);
   
 }

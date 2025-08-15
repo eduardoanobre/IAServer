@@ -90,7 +90,7 @@ public class ContextShardService {
 	}
 
 	public Optional<ContextShardEntity> findLatest(String chatId, String type) {
-		return repo.findTopByChatIdAndTypeOrderByVersionDescIdDesc(chatId, type);
+		return repo.findTopByChatIdAndShardTypeOrderByVersionDescIdDesc(chatId, type);
 	}
 
 	/** true se existe pelo menos um shard daquele tipo para o chat. */

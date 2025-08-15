@@ -207,19 +207,19 @@ public class IaProcessor {
                 int tokensResposta = getInt(res.getUsage(), "output_tokens");
                 BigDecimal custo = OpenAICustoUtil.calcularCustoPorUsage(res.getModel(), tokensPrompt, tokensResposta);
 
-                IaResponse iaResponse = new IaResponse(
-                    chatId,
-                    resposta,
-                    custo,
-                    res.getModel(),
-                    tokensPrompt,
-                    tokensResposta
-                );
+                IaResponse iaResponse = IaResponse.success(
+                	    chatId,
+                	    resposta,
+                	    custo,
+                	    res.getModel(),
+                	    tokensPrompt,
+                	    tokensResposta
+                	);
 
                 return MessageBuilder
                     .withPayload(iaResponse)
                     .copyHeaders(message.getHeaders())
-                    .setHeader(CHAT_ID, chatId) // padroniza header na volta
+                    .setHeader(CHAT_ID, chatId) 
                     .build();
 
             } catch (Exception e) {
@@ -228,14 +228,10 @@ public class IaProcessor {
                     throw new IllegalStateException("Falha transitória ao chamar/processar IA", e);
                 }
 
-                IaResponse erro = new IaResponse(
-                    chatId,
-                    "Erro ao processar IA: " + e.getMessage(),
-                    BigDecimal.ZERO,
-                    "erro",
-                    0,
-                    0
-                );
+                IaResponse erro = IaResponse.error(
+                        chatId,
+                        "Erro ao processar IA: " + e.getMessage()
+                    );
 
                 return MessageBuilder
                     .withPayload(erro)

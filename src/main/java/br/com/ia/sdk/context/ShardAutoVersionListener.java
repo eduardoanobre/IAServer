@@ -1,5 +1,6 @@
 package br.com.ia.sdk.context;
 
+import br.com.ia.utils.ShardUtils;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 

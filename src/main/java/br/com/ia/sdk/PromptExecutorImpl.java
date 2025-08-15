@@ -43,7 +43,7 @@ public class PromptExecutorImpl implements PromptExecutor {
 	private final PendingIaRequestStore pending;
 	private final ObjectMapper objectMapper;
 
-	@Value("${ia.responses.topic:processIa-out-0}")
+	@Value("${ia.requests.topic:processIa-in-0}")
 	private String topic;
 
 	@Value("${erp.ia.reply-timeout-ms:30000}")

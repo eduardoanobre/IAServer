@@ -1,4 +1,4 @@
-package br.com.ia.sdk.context;
+package br.com.ia.utils;
 
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -9,6 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import br.com.ia.sdk.context.ContextShard;
+import br.com.ia.sdk.context.ShardTracked;
+import br.com.ia.sdk.context.Shards;
 
 public final class ShardUtils {
 

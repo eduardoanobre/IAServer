@@ -1,5 +1,6 @@
-package br.com.ia.sdk.context;
+package br.com.ia.sdk.context.entity;
 
+import java.io.Serializable;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
@@ -21,7 +22,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "ia_context_shard", uniqueConstraints = {
+@Table(name = "ia_sever_context_shard", uniqueConstraints = {
 		@UniqueConstraint(name = "uk_shard_chat_type_ver", columnNames = { "chat_id", "shard_type",
 				"version" }) }, indexes = { @Index(name = "idx_shard_chat_type", columnList = "chat_id, shard_type") })
 @Getter
@@ -29,7 +30,9 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ContextShardEntity {
+public class Shard implements Serializable {
+
+	private static final long serialVersionUID = -3714418739346602878L;
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)

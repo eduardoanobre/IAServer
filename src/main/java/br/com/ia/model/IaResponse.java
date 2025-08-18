@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-import br.com.shared.annotations.Comment;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -18,10 +17,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class IaResponse {
 
-	@Comment("ID único do chat (UUID). Mesmo valor enviado na requisição.")
 	private String chatId;
-
-	@Comment("Conteúdo retornado pela IA (JSON conforme schema instruído).")
 	private String resposta;
 
 	private BigDecimal custo;
@@ -35,6 +31,8 @@ public class IaResponse {
 	private boolean success = true;
 	private String errorMessage;
 	private String errorCode;
+
+	// getters and setters
 
 	/**
 	 * Verifica se a resposta foi bem-sucedida
@@ -111,5 +109,12 @@ public class IaResponse {
 	 */
 	public static IaResponse error(String chatId, String errorMessage) {
 		return error(chatId, errorMessage, null);
+	}
+
+	/**
+	 * Cria uma resposta de ignore
+	 */
+	public static IaResponse ignore() {
+		return null;
 	}
 }

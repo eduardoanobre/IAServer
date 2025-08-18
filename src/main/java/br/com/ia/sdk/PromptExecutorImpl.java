@@ -1,8 +1,6 @@
 package br.com.ia.sdk;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -10,26 +8,18 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cloud.stream.function.StreamBridge;
-import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import br.com.ia.model.IaRequest;
-import br.com.ia.model.IaResponse;
-import br.com.ia.model.RequestProvider;
 import br.com.ia.sdk.context.ContextShard;
 import br.com.ia.sdk.context.ContextShardDTOs;
 import br.com.ia.sdk.context.ContextShards;
+import br.com.ia.sdk.context.service.ShardService;
+import br.com.ia.sdk.exception.IAExecutionException;
 import br.com.ia.sdk.transport.PromptRequestPayload;
-import br.com.ia.services.PendingIaRequestStore;
-import br.com.ia.utils.CacheKeys;
-import br.com.ia.utils.IAUtils;
-import br.com.shared.exception.IAException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,18 +28,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PromptExecutorImpl implements PromptExecutor {
 
-	private final StreamBridge bridge;
-	private final RequestProvider provider;
-	private final PendingIaRequestStore pending;
 	private final ObjectMapper objectMapper;
+	private final ShardService shardService;
+	private final IAServerClient iaServerClient;
 
-	@Value("${ia.requests.topic:processIa-in-0}")
-	private String topic;
-
-	@Value("${erp.ia.reply-timeout-ms:30000}")
-	private long timeoutMs;
-
-	@Value("${erp.ia.max-payload-size:30000}")
+	@Value("${erp.ia.max-payload-size:500000}")
 	private int maxPayloadSize;
 
 	@Value("${erp.ia.max-shard-text-length:2000}")
@@ -62,257 +45,124 @@ public class PromptExecutorImpl implements PromptExecutor {
 	@Value("${erp.ia.stable-shard-ref-enabled:false}")
 	private boolean stableShardRefEnabled;
 
-	/**
-	 * Ordem de remocao de shards por tipo (CSV). Ex.:
-	 * "projeto_participantes,projeto_descricao,projeto_escopo"
-	 */
-	@Value("${erp.ia.shard-removal-order:}")
 	private String shardRemovalOrderCsv;
 
 	@Override
-	public IaResponse executaPrompt(PromptRequest r) throws IAException {
-		preValidacoes(r);
+	public boolean executaPrompt(PromptRequest request) throws IAExecutionException {
 
-		// 1) Otimiza e valida o payload (via wrapper serializável)
-		r = otimizarEValidar(r);
+		preValidacoes(request);
 
-		// 2) Monta opções para o provider
-		Map<String, Object> opts = criarOpcoesRequest(r);
-		IaRequest iaReq = provider.getRequest(r.getPrompt(), r.getChatId(), r.getApiKey(), opts);
+		var chatId = request.getChatId();
+		log.info("🚀 Iniciando execução de prompt para chatId: {}", chatId);
 
-		// 3) Validação final do IaRequest serializado (tamanho/JSON)
-		validarIaRequestFinal(iaReq);
+		upsertShards(request, chatId);
 
-		// 4) Envia e aguarda resposta
-		var future = pending.create(r.getChatId());
-		Message<IaRequest> msg = MessageBuilder.withPayload(iaReq).setHeader("chatId", r.getChatId())
-				.setHeader(KafkaHeaders.KEY, r.getChatId()).build();
+		request = otimizarEValidar(request);
+		log.debug("✅ Payload otimizado e validado");
 
-		bridge.send(topic, msg);
+		request.setType(IaRequest.REQUEST_TYPE_COMMAND);
 
-		return IAUtils.aguardarRespostaIA(r.getChatId(), future, pending, Duration.ofMillis(timeoutMs), true);
-	}
+		boolean sent = iaServerClient.sendIaRequest(criarIaRequest(request));
 
-	/** Cria o mapa de opções para o request */
-	private Map<String, Object> criarOpcoesRequest(PromptRequest r) {
-		Map<String, Object> opts = new HashMap<>();
-		opts.put("model", r.getModel());
-
-		if (!isBlank(r.getInstructions())) {
-			opts.put("instructions", r.getInstructions());
-		}
-		if (r.getText() != null) {
-			opts.put("text", r.getText());
-		}
-		if (r.getMaxOutputTokens() != null) {
-			opts.put("max_output_tokens", r.getMaxOutputTokens());
+		if (sent) {
+			log.info("IA Request sent to IAServer - ChatId: {}", chatId);
+		} else {
+			log.error("Failed to send IA Request to IAServer - ChatId: {}", chatId);
 		}
 
-		// temperatura (0..100 -> 0..2)
-		double temp = Temperature.fromPercent(r.getTemperaturePercent(), Temperature.DEFAULT);
-		opts.put("temperature", temp);
-
-		// segurança/telemetria
-		opts.put("safety_identifier", r.getChatId());
-
-		// Context shards processados (sem duplicar)
-		processarContextShards(r, opts);
-
-		// Cache key
-		adicionarCacheKey(r, opts);
-
-		// Metadata
-		opts.put("metadata", Map.of("chatId", r.getChatId(), "moduleKey", obterModuleKey(r)));
-
-		return opts;
+		return sent;
 	}
 
-	/** Processa e adiciona context shards às opções (UMA entrada por shard) */
-	private void processarContextShards(PromptRequest r, Map<String, Object> opts) {
-		if (r.getContextShards() == null || r.getContextShards().isEmpty())
-			return;
+	private IaRequest criarIaRequest(PromptRequest request) {
 
-		var wire = new ArrayList<Map<String, Object>>();
-		for (ContextShard s : r.getContextShards()) {
-			Map<String, Object> item = new HashMap<>();
-			item.put(ContextShards.TYPE, s.type());
-			item.put(ContextShards.VERSION, s.version());
-			item.put("stable", s.stable());
-			if (s.payload() != null) {
-				item.put("payload", s.payload());
-			}
-			wire.add(item);
-		}
-		opts.put("context_shards", wire);
-	}
+		// Build complete context shards
+		List<ContextShard> shardsCompleta = montarContextShards(request);
 
-	/** Adiciona chave de cache às opções */
-	private void adicionarCacheKey(PromptRequest r, Map<String, Object> opts) {
-		String moduleKey = obterModuleKey(r);
-		Integer rulesV = r.getVersaoRegrasModulo() == null ? 1 : r.getVersaoRegrasModulo();
-		Integer schemaV = r.getVersaoSchema() == null ? 1 : r.getVersaoSchema();
-
-		var shardList = new ArrayList<Map<String, Object>>();
-		if (r.getContextShards() != null) {
-			for (var s : r.getContextShards()) {
-				shardList.add(Map.of(ContextShards.TYPE, s.type(), ContextShards.VERSION, s.version()));
-			}
+		// Convert ContextShards to the format expected by IAServer
+		List<Map<String, Object>> contextShardsData = new ArrayList<>();
+		for (ContextShard shard : shardsCompleta) {
+			Map<String, Object> shardData = Map.of(IaRequest.SHARD_TYPE, shard.type(), IaRequest.SHARD_VERSION,
+					shard.version(), IaRequest.SHARD_STABLE, shard.stable(), IaRequest.SHARD_PAYLOAD,
+					shard.payload() != null ? shard.payload() : Map.of());
+			contextShardsData.add(shardData);
 		}
 
-		String cacheKey = CacheKeys.compose(r.getChatId(), moduleKey, rulesV, schemaV, shardList, r.getCacheFacet());
-		opts.put("prompt_cache_key", cacheKey);
+		// Create options for IaRequest
+		Map<String, Object> options = Map.of(IaRequest.API_KEY, request.getApiKey(), IaRequest.MODEL,
+				request.getModel(), IaRequest.INSTRUCTIONS, request.getInstructions(), IaRequest.TEMPERATURE,
+				normalizeTemperature(request.getTemperaturePercent()), IaRequest.MAX_OUTPUT_TOKENS,
+				request.getMaxOutputTokens(), IaRequest.CONTEXT_SHARDS, contextShardsData, IaRequest.TEXT,
+				request.getSchema(), IaRequest.MODULE_KEY, request.getModuleKey(), IaRequest.VERSAO_SCHEMA,
+				request.getSchemaVersion(), IaRequest.VERSAO_REGRAS_MODULO, request.getInstructions());
+
+		return IaRequest.builder().chatId(request.getChatId()).prompt(request.getPrompt()).options(options).build();
 	}
 
-	/** Obtém a chave do módulo */
-	private String obterModuleKey(PromptRequest r) {
-		return (r.getModuleKey() == null || r.getModuleKey().isBlank()) ? "generic" : r.getModuleKey();
-	}
+	private List<ContextShard> montarContextShards(PromptRequest request) {
+		var list = new ArrayList<ContextShard>();
+		list.add(request.getShardInstrucao());
+		list.add(request.getShardObjetivo());
+		list.add(request.getShardEscopo());
+		list.add(request.getShardDescricao());
+		list.add(request.getShardParticipantes());
 
-	/** Cria uma cópia do PromptRequest para modificação */
-	private PromptRequest criarCopiaRequest(PromptRequest original) {
-		PromptRequest copia = new PromptRequest();
-		copia.setChatId(original.getChatId());
-		copia.setPrompt(original.getPrompt());
-		copia.setApiKey(original.getApiKey());
-		copia.setModel(original.getModel());
-		copia.setInstructions(original.getInstructions());
-		copia.setText(original.getText());
-		copia.setMaxOutputTokens(original.getMaxOutputTokens());
-		copia.setTemperaturePercent(original.getTemperaturePercent());
-		copia.setModuleKey(original.getModuleKey());
-		copia.setVersaoRegrasModulo(original.getVersaoRegrasModulo());
-		copia.setVersaoSchema(original.getVersaoSchema());
-		copia.setCacheFacet(original.getCacheFacet());
-		copia.setVersaoInstrucaoProjeto(original.getVersaoInstrucaoProjeto());
-
-		// Copiar context shards (referência, não deep copy)
-		if (original.getContextShards() != null) {
-			copia.setContextShards(new ArrayList<>(original.getContextShards()));
-		}
-		return copia;
-	}
-
-	/** Otimiza o prompt truncando se necessário */
-	private PromptRequest otimizarPrompt(PromptRequest r) {
-		if (r.getPrompt() != null && r.getPrompt().length() > maxPromptLength) {
-			String promptOriginal = r.getPrompt();
-			String promptTruncado = truncarTextoInteligente(promptOriginal, maxPromptLength);
-			r.setPrompt(promptTruncado);
-			log.debug("Prompt truncado: {} → {} caracteres", promptOriginal.length(), promptTruncado.length());
-		}
-		return r;
-	}
-
-	/** Otimiza context shards removendo ou truncando conteúdo (domínio) */
-	private PromptRequest otimizarContextShards(PromptRequest r) {
-		if (r.getContextShards() == null || r.getContextShards().isEmpty())
-			return r;
-
-		List<ContextShard> shards = r.getContextShards();
-		List<ContextShard> shardsOtimizados = new ArrayList<>(shards.size());
-
-		for (ContextShard shard : shards) {
-			ContextShard shardOtimizado = otimizarShard(shard);
-			if (shardOtimizado != null)
-				shardsOtimizados.add(shardOtimizado);
+		if (request.getShards() != null && !request.getShards().isEmpty()) {
+			list.addAll(request.getShards());
 		}
 
-		r.setContextShards(shardsOtimizados);
-		log.debug("Context shards otimizados: {} → {} shards", shards.size(), shardsOtimizados.size());
-		return r;
+		return list;
 	}
 
-	/** Trunca texto de forma inteligente mantendo contexto */
-	private String truncarTextoInteligente(String texto, int tamanhoMaximo) {
-		if (texto.length() <= tamanhoMaximo)
-			return texto;
+	/**
+	 * Normalizes temperature from 0-100 to 0.0-2.0 range
+	 */
+	private double normalizeTemperature(double d) {
+		if (d < 0)
+			return 0.3;
+		if (d > 100)
+			return 2.0;
+		return (d / 100.0) * 2.0;
+	}
 
-		int tamanhoInicio = tamanhoMaximo / 2;
-		int tamanhoFim = tamanhoMaximo / 4;
+	private void preValidacoes(PromptRequest request) throws IAExecutionException {
+		if (request == null)
+			throw new IAExecutionException("PromptRequest nulo");
+		if (isBlank(request.getChatId()))
+			throw new IAExecutionException("chatId obrigatório");
+		if (isBlank(request.getPrompt()))
+			throw new IAExecutionException("prompt obrigatório");
+		if (isBlank(request.getApiKey()))
+			throw new IAExecutionException("apiKey obrigatório");
+		if (isBlank(request.getModel()))
+			throw new IAExecutionException("model obrigatório");
+		log.debug("✅ Pré-validações concluídas");
+	}
 
-		if (tamanhoInicio + tamanhoFim + 50 >= tamanhoMaximo) {
-			return texto.substring(0, Math.max(0, tamanhoMaximo - 3)) + "...";
+	private void upsertShards(PromptRequest request, String chatId) {
+		var shardDescricao = request.getShardDescricao();
+		shardService.upsert(chatId, shardDescricao);
+
+		var shardEscopo = request.getShardEscopo();
+		shardService.upsert(chatId, shardEscopo);
+
+		var shardInstrucao = request.getShardInstrucao();
+		shardService.upsert(chatId, shardInstrucao);
+
+		var shardObjetivo = request.getShardObjetivo();
+		shardService.upsert(chatId, shardObjetivo);
+
+		var shardParticipantes = request.getShardParticipantes();
+		shardService.upsert(chatId, shardParticipantes);
+
+		for (ContextShard shard : request.getShards()) {
+			shardService.upsert(chatId, shard);
 		}
 
-		String inicio = texto.substring(0, tamanhoInicio);
-		String fim = texto.substring(texto.length() - tamanhoFim);
-
-		return inicio + "\n\n[... texto truncado para otimizar payload ...]\n\n" + fim;
-	}
-
-	/** Otimiza as instruções se muito longas */
-	private PromptRequest otimizarInstructions(PromptRequest r) {
-		if (r.getInstructions() != null && r.getInstructions().length() > 3000) {
-			String original = r.getInstructions();
-			String truncadas = truncarTextoInteligente(original, 3000);
-			r.setInstructions(truncadas);
-			log.debug("Instructions truncadas: {} → {} caracteres", original.length(), truncadas.length());
-		}
-		return r;
-	}
-
-	/** Reduz o número máximo de tokens de saída */
-	private PromptRequest reduzirMaxOutputTokens(PromptRequest r) {
-		if (r.getMaxOutputTokens() != null && r.getMaxOutputTokens() > 800) {
-			Integer original = r.getMaxOutputTokens();
-			r.setMaxOutputTokens(800);
-			log.debug("Max output tokens reduzido: {} → {}", original, 800);
-		}
-		return r;
-	}
-
-	/** Validação final do IaRequest serializado */
-	private void validarIaRequestFinal(IaRequest iaReq) throws IAException {
-		try {
-			String json = objectMapper.writeValueAsString(iaReq);
-			int tamanho = json.getBytes(StandardCharsets.UTF_8).length;
-
-			if (tamanho > maxPayloadSize) {
-				throw new IAException(
-						String.format("IaRequest final muito grande: %d bytes > %d bytes", tamanho, maxPayloadSize));
-			}
-			log.debug("IaRequest final validado: {} bytes", tamanho);
-		} catch (JsonProcessingException e) {
-			throw new IAException("Erro ao serializar IaRequest final: " + e.getMessage(), e);
-		}
-	}
-
-	private void preValidacoes(PromptRequest r) throws IAException {
-		if (r == null)
-			throw new IAException("PromptRequest nulo");
-		if (isBlank(r.getChatId()))
-			throw new IAException("chatId obrigatório");
-		if (isBlank(r.getPrompt()))
-			throw new IAException("prompt obrigatório");
-		if (isBlank(r.getApiKey()))
-			throw new IAException("apiKey obrigatório");
-		if (isBlank(r.getModel()))
-			throw new IAException("model obrigatório");
-	}
-
-	private static boolean isBlank(String s) {
-		return s == null || s.isBlank();
-	}
-
-	// ===================== NOVO PIPELINE DE OTIMIZAÇÃO =====================
-
-	/** Constrói o wrapper serializável para estimar tamanho com segurança */
-	private PromptRequestPayload buildPayload(PromptRequest req) {
-		// Converte o domínio para DTOs estáveis SOMENTE aqui (fronteira)
-		final var shardDTOs = ContextShardDTOs.copyOf(req.getContextShards());
-		return new PromptRequestPayload(req.getChatId(), req.getModel(), req.getPrompt(), shardDTOs,
-				req.getMaxOutputTokens(), req.getTemperaturePercent());
-	}
-
-	/** Calcula o tamanho aproximado do payload (via wrapper serializável) */
-	private int calcularTamanhoPayload(PromptRequest r) throws JsonProcessingException {
-		var payload = buildPayload(r);
-		byte[] json = objectMapper.writeValueAsBytes(payload);
-		return json.length;
+		log.debug("✅ Upserts concluídos");
 	}
 
 	/** Valida e otimiza o payload (parando assim que ficar dentro do limite) */
-	private PromptRequest otimizarEValidar(PromptRequest r) throws IAException {
+	private PromptRequest otimizarEValidar(PromptRequest r) throws IAExecutionException {
 		try {
 			int atual = calcularTamanhoPayload(r);
 			if (atual <= maxPayloadSize) {
@@ -321,7 +171,7 @@ public class PromptExecutorImpl implements PromptExecutor {
 			}
 
 			log.warn("Payload excede limite: {} bytes > {} bytes. Iniciando otimização...", atual, maxPayloadSize);
-			PromptRequest x = criarCopiaRequest(r);
+			PromptRequest x = new PromptRequest(r);
 
 			// 1) prompt
 			x = otimizarPrompt(x);
@@ -354,12 +204,57 @@ public class PromptExecutorImpl implements PromptExecutor {
 				return x;
 
 			int t = calcularTamanhoPayload(x);
-			throw new IAException(
+			throw new IAExecutionException(
 					"Payload muito grande mesmo após otimização: %d bytes > %d bytes".formatted(t, maxPayloadSize));
 
 		} catch (JsonProcessingException e) {
-			throw new IAException("Erro ao serializar payload para validação: " + e.getMessage(), e);
+			throw new IAExecutionException("Erro ao serializar payload para validação: " + e.getMessage(), e);
 		}
+	}
+
+	/** Constrói o wrapper serializável para estimar tamanho com segurança */
+	private PromptRequestPayload buildPayload(PromptRequest req) {
+		// Converte o domínio para DTOs estáveis SOMENTE aqui (fronteira)
+		final var shardDTOs = ContextShardDTOs.copyOf(req.getShards());
+		return new PromptRequestPayload(req.getChatId(), req.getModel(), req.getPrompt(), shardDTOs,
+				req.getMaxOutputTokens(), req.getTemperaturePercent());
+	}
+
+	/** Calcula o tamanho aproximado do payload (via wrapper serializável) */
+	private int calcularTamanhoPayload(PromptRequest request) throws JsonProcessingException {
+		var payload = buildPayload(request);
+		byte[] json = objectMapper.writeValueAsBytes(payload);
+		return json.length;
+	}
+
+	/** Otimiza o prompt truncando se necessário */
+	private PromptRequest otimizarPrompt(PromptRequest request) {
+		if (request.getPrompt() != null && request.getPrompt().length() > maxPromptLength) {
+			String promptOriginal = request.getPrompt();
+			String promptTruncado = truncarTextoInteligente(promptOriginal, maxPromptLength);
+			request.setPrompt(promptTruncado);
+			log.debug("Prompt truncado: {} → {} caracteres", promptOriginal.length(), promptTruncado.length());
+		}
+		return request;
+	}
+
+	/** Otimiza context shards removendo ou truncando conteúdo (domínio) */
+	private PromptRequest otimizarContextShards(PromptRequest r) {
+		if (r.getShards() == null || r.getShards().isEmpty())
+			return r;
+
+		List<ContextShard> shards = r.getShards();
+		List<ContextShard> shardsOtimizados = new ArrayList<>(shards.size());
+
+		for (ContextShard shard : shards) {
+			ContextShard shardOtimizado = otimizarShard(shard);
+			if (shardOtimizado != null)
+				shardsOtimizados.add(shardOtimizado);
+		}
+
+		r.setShards(shardsOtimizados);
+		log.debug("Context shards otimizados: {} → {} shards", shards.size(), shardsOtimizados.size());
+		return r;
 	}
 
 	/** Otimiza um shard individual (domínio) */
@@ -383,34 +278,15 @@ public class PromptExecutorImpl implements PromptExecutor {
 		return ContextShards.ephemeral(shard.type(), shard.version(), shard.stable(), payloadOtimizado);
 	}
 
-	// ---------------- VARIANTE 1: header-only (sem payload) ----------------
-	/** Para shards estáveis, mantém só cabeçalho (sem payload) */
-	private PromptRequest stripStableShardPayloadsHeader(PromptRequest r) {
-		if (r.getContextShards() == null || r.getContextShards().isEmpty())
-			return r;
-
-		var out = new ArrayList<ContextShard>(r.getContextShards().size());
-		for (var s : r.getContextShards()) {
-			if (Boolean.TRUE.equals(s.stable())) {
-				out.add(ContextShards.ephemeral(s.type(), s.version(), true, null));
-			} else {
-				out.add(s);
-			}
-		}
-		r.setContextShards(out);
-		return r;
-	}
-
-	// ---------------- VARIANTE 2: com ref (fingerprint SHA-256) -----------
 	/**
 	 * Para shards estáveis, envia {"ref": "<sha256>"} em vez do payload completo
 	 */
 	private PromptRequest stripStableShardPayloadsWithRef(PromptRequest r) {
-		if (r.getContextShards() == null || r.getContextShards().isEmpty())
+		if (r.getShards() == null || r.getShards().isEmpty())
 			return r;
 
-		var out = new ArrayList<ContextShard>(r.getContextShards().size());
-		for (var s : r.getContextShards()) {
+		var out = new ArrayList<ContextShard>(r.getShards().size());
+		for (var s : r.getShards()) {
 			if (Boolean.TRUE.equals(s.stable()) && s.payload() != null) {
 				String ref = fingerprintPayload(s.payload());
 				out.add(ContextShards.ephemeral(s.type(), s.version(), true, Map.of("ref", ref)));
@@ -420,7 +296,7 @@ public class PromptExecutorImpl implements PromptExecutor {
 				out.add(s);
 			}
 		}
-		r.setContextShards(out);
+		r.setShards(out);
 		return r;
 	}
 
@@ -437,14 +313,51 @@ public class PromptExecutorImpl implements PromptExecutor {
 		}
 	}
 
-	// ---------------- Poda por prioridade (opcional) ----------------------
+	/** Para shards estáveis, mantém só cabeçalho (sem payload) */
+	private PromptRequest stripStableShardPayloadsHeader(PromptRequest r) {
+		if (r.getShards() == null || r.getShards().isEmpty())
+			return r;
+
+		var out = new ArrayList<ContextShard>(r.getShards().size());
+		for (var s : r.getShards()) {
+			if (Boolean.TRUE.equals(s.stable())) {
+				out.add(ContextShards.ephemeral(s.type(), s.version(), true, null));
+			} else {
+				out.add(s);
+			}
+		}
+		r.setShards(out);
+		return r;
+	}
+
+	/** Otimiza as instruções se muito longas */
+	private PromptRequest otimizarInstructions(PromptRequest r) {
+		if (r.getInstructions() != null && r.getInstructions().length() > 3000) {
+			String original = r.getInstructions();
+			String truncadas = truncarTextoInteligente(original, 3000);
+			r.setInstructions(truncadas);
+			log.debug("Instructions truncadas: {} → {} caracteres", original.length(), truncadas.length());
+		}
+		return r;
+	}
+
+	/** Reduz o número máximo de tokens de saída */
+	private PromptRequest reduzirMaxOutputTokens(PromptRequest r) {
+		if (r.getMaxOutputTokens() > 800) {
+			Integer original = r.getMaxOutputTokens();
+			r.setMaxOutputTokens(800);
+			log.debug("Max output tokens reduzido: {} → {}", original, 800);
+		}
+		return r;
+	}
+
 	/**
 	 * Remove shards por tipo, na ordem definida em erp.ia.shard-removal-order
 	 * (CSV), até caber no limite
 	 */
 	private PromptRequest podarShardsPorPrioridade(PromptRequest r) throws JsonProcessingException {
 		List<String> ordem = removalOrder();
-		if (ordem.isEmpty() || r.getContextShards() == null || r.getContextShards().isEmpty())
+		if (ordem.isEmpty() || r.getShards() == null || r.getShards().isEmpty())
 			return r;
 
 		for (String tipo : ordem) {
@@ -452,16 +365,38 @@ public class PromptExecutorImpl implements PromptExecutor {
 				break;
 
 			while (calcularTamanhoPayload(r) > maxPayloadSize) {
-				int idx = findLastIndexByType(r.getContextShards(), tipo);
+				int idx = findLastIndexByType(r.getShards(), tipo);
 				if (idx < 0)
 					break;
 
-				var nova = new ArrayList<ContextShard>(r.getContextShards());
+				var nova = new ArrayList<ContextShard>(r.getShards());
 				nova.remove(idx);
-				r.setContextShards(nova);
+				r.setShards(nova);
 			}
 		}
 		return r;
+	}
+
+	/** Trunca texto de forma inteligente mantendo contexto */
+	private String truncarTextoInteligente(String texto, int tamanhoMaximo) {
+		if (texto.length() <= tamanhoMaximo)
+			return texto;
+
+		int tamanhoInicio = tamanhoMaximo / 2;
+		int tamanhoFim = tamanhoMaximo / 4;
+
+		if (tamanhoInicio + tamanhoFim + 50 >= tamanhoMaximo) {
+			return texto.substring(0, Math.max(0, tamanhoMaximo - 3)) + "...";
+		}
+
+		String inicio = texto.substring(0, tamanhoInicio);
+		String fim = texto.substring(texto.length() - tamanhoFim);
+
+		return inicio + "\n\n[... texto truncado para otimizar payload ...]\n\n" + fim;
+	}
+
+	private static boolean isBlank(String s) {
+		return s == null || s.isBlank();
 	}
 
 	private int findLastIndexByType(List<ContextShard> lst, String type) {
@@ -484,4 +419,5 @@ public class PromptExecutorImpl implements PromptExecutor {
 		}
 		return out;
 	}
+
 }

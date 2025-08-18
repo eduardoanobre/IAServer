@@ -1,4 +1,4 @@
-package br.com.ia.sdk.context;
+package br.com.ia.sdk.context.service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -10,12 +10,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import br.com.ia.sdk.context.BasicContextShard;
+import br.com.ia.sdk.context.ContextShard;
+import br.com.ia.sdk.context.ContextShards;
+import br.com.ia.sdk.context.entity.Shard;
+import br.com.ia.sdk.context.repository.ShardRepository;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
-public class ContextShardService {
+public class ShardService {
 
-	private final ContextShardRepository repo;
+	private final ShardRepository repository;
 	private final ObjectMapper mapper;
 
 	@Transactional
@@ -23,18 +28,17 @@ public class ContextShardService {
 		try {
 			String json = mapper.writeValueAsString(shard.payload());
 			// upsert por (chatId, type, version)
-			Optional<ContextShardEntity> existing = repo
-					.findTopByChatIdAndShardTypeOrderByVersionDesc(chatId, shard.type())
+			Optional<Shard> existing = repository.findTopByChatIdAndShardTypeOrderByVersionDesc(chatId, shard.type())
 					.filter(e -> e.getVersion() == shard.version());
 
-			ContextShardEntity e = existing.orElseGet(ContextShardEntity::new);
+			Shard e = existing.orElseGet(Shard::new);
 			e.setChatId(chatId);
 			e.setShardType(shard.type());
 			e.setVersion(shard.version());
 			e.setStable(shard.stable());
 			e.setPayloadJson(json);
 
-			repo.save(e);
+			repository.save(e);
 		} catch (Exception ex) {
 			throw new IllegalStateException("Falha ao persistir shard " + shard.type(), ex);
 		}
@@ -43,11 +47,11 @@ public class ContextShardService {
 	public List<ContextShard> findByTypes(String chatId, List<String> types) {
 		if (types == null || types.isEmpty())
 			return List.of();
-		return repo.findByChatIdAndShardTypeIn(chatId, types).stream().map(this::toShard).toList();
+		return repository.findByChatIdAndShardTypeIn(chatId, types).stream().map(this::toShard).toList();
 	}
 
 	public List<ContextShard> findAll(String chatId) {
-		return repo.findByChatId(chatId).stream().map(this::toShard).toList();
+		return repository.findByChatId(chatId).stream().map(this::toShard).toList();
 	}
 
 	/**
@@ -64,7 +68,7 @@ public class ContextShardService {
 				.toList();
 	}
 
-	private ContextShard toShard(ContextShardEntity e) {
+	private ContextShard toShard(Shard e) {
 		try {
 			@SuppressWarnings("unchecked")
 			Map<String, Object> payload = mapper.readValue(e.getPayloadJson(), Map.class);
@@ -77,7 +81,7 @@ public class ContextShardService {
 
 	/**
 	 * Carrega os shards mais recentes para cada tipo solicitado e converte para
-	 * {@link ContextShard} efêmero (pronto para envio).
+	 * {@link Shard} efêmero (pronto para envio).
 	 */
 	@Transactional(readOnly = true)
 	public List<ContextShard> loadShards(String chatId, String... types) {
@@ -89,8 +93,8 @@ public class ContextShardService {
 		return out;
 	}
 
-	public Optional<ContextShardEntity> findLatest(String chatId, String type) {
-		return repo.findTopByChatIdAndShardTypeOrderByVersionDescIdDesc(chatId, type);
+	public Optional<Shard> findLatest(String chatId, String type) {
+		return repository.findTopByChatIdAndShardTypeOrderByVersionDescIdDesc(chatId, type);
 	}
 
 	/** true se existe pelo menos um shard daquele tipo para o chat. */
@@ -99,7 +103,7 @@ public class ContextShardService {
 		return findLatest(chatId, type).isPresent();
 	}
 
-	private Map<String, Object> payloadMap(ContextShardEntity e) {
+	private Map<String, Object> payloadMap(Shard e) {
 		String json = e.getPayloadJson();
 		if (json == null || json.isBlank())
 			return Map.of();

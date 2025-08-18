@@ -84,12 +84,6 @@
 			<scope>test</scope>
 		</dependency>
 
-
-		<dependency>
-			<groupId>br.com.shared</groupId>
-			<artifactId>SharedProject</artifactId>
-			<version>1.0.0</version>
-		</dependency>
 	</dependencies>
 
 	<dependencyManagement>

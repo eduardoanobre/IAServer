@@ -1,17 +1,20 @@
 package br.com.ia.services.client.responses;
 
-import br.com.ia.model.responses.ResponsesRequest;
-import br.com.ia.model.responses.ResponsesResponse;
-import br.com.shared.exception.IAException;
-import lombok.RequiredArgsConstructor;
+import java.util.function.Consumer;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+
+import br.com.ia.model.responses.ResponsesRequest;
+import br.com.ia.model.responses.ResponsesResponse;
+import br.com.ia.sdk.exception.IAExecutionException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
-import java.util.function.Consumer;
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ResponsesClient {
@@ -29,18 +32,25 @@ public class ResponsesClient {
   }
 
   /** Chamada síncrona (sem streaming) */
-  public ResponsesResponse createResponse(String apiKey, ResponsesRequest req) throws IAException {
+  public ResponsesResponse createResponse(String apiKey, ResponsesRequest req) throws IAExecutionException {
+	  log.info(req.getModel());
     try {
-      if (req.getModel() == null) req.setModel("gpt-5");
       return client(apiKey)
           .post()
           .uri("/responses")
           .bodyValue(req)
           .retrieve()
+          .onStatus(s -> s.is4xxClientError() || s.is5xxServerError(), r ->
+	          r.bodyToMono(String.class).flatMap(body -> {
+	            log.error("OpenAI error {} body={}", r.statusCode(), body);
+	            return reactor.core.publisher.Mono.error(
+	              new RuntimeException("Responses API error: " + body));
+	          })
+      )
           .bodyToMono(ResponsesResponse.class)
           .block();
     } catch (Exception e) {
-      throw new IAException("Falha ao chamar Responses API: " + e.getMessage(), e);
+      throw new IAExecutionException("Falha ao chamar Responses API: " + e.getMessage(), e);
     }
   }
 

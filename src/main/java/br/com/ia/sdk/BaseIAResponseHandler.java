@@ -17,9 +17,10 @@ import lombok.extern.slf4j.Slf4j;
  * from IAServer. Place this in the SDK package (br.com.ia.sdk) to be shared
  * across all modules.
  * 
- * Usage: 1. Workspace: WorkspaceIaResponseHandler extends BaseIAResponseHandler
- * 2. Marketing: MarketingIaResponseHandler extends BaseIAResponseHandler 3.
- * ERP: ErpIaResponseHandler extends BaseIAResponseHandler
+ * Usage: </br></br>
+ * 1. Workspace: WorkspaceIaResponseHandler extends BaseIAResponseHandler </br>
+ * 2. Marketing: MarketingIaResponseHandler extends BaseIAResponseHandler </br>
+ * 3. ERP: ErpIaResponseHandler extends BaseIAResponseHandler</br></br>
  * 
  * Each module implements its own @Bean iaReplies() function that calls
  * processResponse()

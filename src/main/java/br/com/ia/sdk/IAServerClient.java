@@ -5,12 +5,9 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
@@ -18,86 +15,45 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import br.com.ia.model.IaRequest;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * IA SERVER CLIENT - KafkaTemplate Only (Simplified)
+ * IA Server Client - Updated for Centralized Kafka Configuration
  * 
- * This version uses ONLY KafkaTemplate to avoid StreamBridge configuration issues
- * Simpler and more reliable for direct Kafka communication
+ * Now uses the centralized KafkaTemplate from IaKafkaConfiguration
+ * instead of creating its own producer.
  */
 @Component
 @Slf4j
 public class IAServerClient {
 
     private final ObjectMapper objectMapper;
-    private KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
-    @Value("${ia.requests.topic:ia.requests}")
+    @Value("${ia.kafka.topics.requests:ia.requests}")
     private String iaRequestsTopic;
 
     @Value("${ia.base64.wrapper.enabled:true}")
     private boolean base64WrapperEnabled;
 
-    @Value("${ia.connection.test.chatid.prefix:test-workspace-}")
+    @Value("${ia.test.chatid.prefix:test-}")
     private String testChatIdPrefix;
 
     @Value("${spring.application.name:workspace}")
     private String moduleName;
 
-    @Value("${spring.cloud.stream.kafka.binder.brokers}")
-    private String bootstrapServers;
-
-    public IAServerClient(ObjectMapper objectMapper) {
+    // Constructor injection using the centralized KafkaTemplate
+    public IAServerClient(ObjectMapper objectMapper, 
+                         @Qualifier("iaKafkaTemplate") KafkaTemplate<String, String> kafkaTemplate) {
         this.objectMapper = objectMapper;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
     @PostConstruct
     public void init() {
-        initializeKafkaTemplate();
         log.info("[IA-SERVER-CLIENT] Initialized - Module: {}, Topic: {}, Base64: {}", 
                 moduleName, iaRequestsTopic, base64WrapperEnabled);
-    }
-
-    @PreDestroy
-    public void cleanup() {
-        if (kafkaTemplate != null) {
-            kafkaTemplate.destroy();
-            log.info("[IA-SERVER-CLIENT] KafkaTemplate destroyed");
-        }
-    }
-
-    /**
-     * Initialize KafkaTemplate with correct configuration
-     */
-    private void initializeKafkaTemplate() {
-        log.info("[KAFKA-INIT] Initializing KafkaTemplate for module: {}", moduleName);
-
-        Map<String, Object> configProps = new HashMap<>();
-        configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        
-        // Correct configuration for idempotent producer
-        configProps.put(ProducerConfig.ACKS_CONFIG, "all");
-        configProps.put(ProducerConfig.RETRIES_CONFIG, 3);
-        configProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        configProps.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
-        
-        // Timeout settings
-        configProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30000);
-        configProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 60000);
-        
-        // Performance settings
-        configProps.put(ProducerConfig.LINGER_MS_CONFIG, 0);
-        configProps.put(ProducerConfig.BATCH_SIZE_CONFIG, 16384);
-        configProps.put(ProducerConfig.BUFFER_MEMORY_CONFIG, 33554432);
-
-        ProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(configProps);
-        kafkaTemplate = new KafkaTemplate<>(producerFactory);
-
-        log.info("[KAFKA-INIT] KafkaTemplate initialized successfully");
+        log.info("[IA-SERVER-CLIENT] Using centralized KafkaTemplate from IaKafkaConfiguration");
     }
 
     /**
@@ -136,7 +92,7 @@ public class IAServerClient {
             log.debug("[SEND-IA-REQUEST] Base64 wrapping completed - Length: {} chars", 
                      base64Message.length());
 
-            // Send message using KafkaTemplate
+            // Send message using centralized KafkaTemplate
             boolean success = sendMessage(base64Message, request.getChatId());
             
             if (success) {
@@ -225,7 +181,7 @@ public class IAServerClient {
     }
 
     /**
-     * Send message using KafkaTemplate only
+     * Send message using centralized KafkaTemplate
      */
     private boolean sendMessage(String base64Message, String chatId) {
         try {
@@ -236,15 +192,17 @@ public class IAServerClient {
                 .send(iaRequestsTopic, chatId, base64Message)
                 .get(); // This blocks until completion
 
-            log.info("[KAFKA-SEND] SUCCESS - ChatId: {}, Partition: {}, Offset: {}", 
-                    chatId, 
+            log.info("[KAFKA-SEND] SUCCESS - ChatId: {}, Topic: {}, Partition: {}, Offset: {}", 
+                    chatId,
+                    iaRequestsTopic,
                     result.getRecordMetadata().partition(), 
                     result.getRecordMetadata().offset());
 
             return true;
 
         } catch (Exception e) {
-            log.error("[KAFKA-SEND] FAILED - ChatId: {}, Error: {}", chatId, e.getMessage());
+            log.error("[KAFKA-SEND] FAILED - ChatId: {}, Topic: {}, Error: {}", 
+                     chatId, iaRequestsTopic, e.getMessage());
             log.debug("[KAFKA-SEND] Exception details:", e);
             return false;
         }

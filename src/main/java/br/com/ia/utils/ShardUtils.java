@@ -13,11 +13,10 @@ import java.util.Objects;
 import br.com.ia.sdk.context.ContextShard;
 import br.com.ia.sdk.context.ShardTracked;
 import br.com.ia.sdk.context.Shards;
+import lombok.experimental.UtilityClass;
 
+@UtilityClass
 public final class ShardUtils {
-
-	private ShardUtils() {
-	}
 
 	/**
 	 * Cria um ContextShard estável/volátil a partir de uma entidade ShardTracked.

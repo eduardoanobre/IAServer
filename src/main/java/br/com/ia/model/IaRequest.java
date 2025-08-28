@@ -16,6 +16,8 @@ import lombok.NoArgsConstructor;
 @Builder
 public class IaRequest {
 
+	private static final String UNKNOWN = "unknown";
+
 	// Constantes para os campos do options Map
 	public static final String TYPE = "type";
 	public static final String API_KEY = "api_key";
@@ -34,10 +36,11 @@ public class IaRequest {
 	public static final String SHARD_VERSION = "version";
 	public static final String SHARD_STABLE = "stable";
 	public static final String SHARD_PAYLOAD = "payload";
-	
+
 	public static final String REQUEST_TYPE_COMMAND = "command";
 	public static final String REQUEST_TYPE_TEST = "test";
 
+	private Long requestId;
 	private String chatId;
 	private String prompt;
 	private Map<String, Object> options;
@@ -59,7 +62,7 @@ public class IaRequest {
 	 * @return Model name or "gpt-5" as default
 	 */
 	public String getModel() {
-		return options != null ? (String) options.getOrDefault(MODEL, "gpt-5") : "gpt-5";
+		return options != null ? (String) options.getOrDefault(MODEL, UNKNOWN) : UNKNOWN;
 	}
 
 	/**

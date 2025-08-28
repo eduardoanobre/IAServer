@@ -4,6 +4,8 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -34,7 +36,8 @@ public class LogIA implements Serializable {
 	@Column(name = "id_chat")
 	private String idChat;
 
-	@Column(name = "data")
+	@CreationTimestamp
+	@Column(name = "data", nullable = false, updatable = false)
 	private LocalDateTime data;
 
 	@Lob
@@ -48,6 +51,10 @@ public class LogIA implements Serializable {
 	@Lob
 	@Column(name = "erro", length = 1000)
 	private String erro;
+
+	@Lob
+	@Column(name = "error_message", columnDefinition = "LONGTEXT")
+	private String errorMessage;
 
 	@Column(name = "sucesso")
 	private boolean sucesso;

@@ -1,6 +1,6 @@
 package br.com.ia.services;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,39 +11,46 @@ import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import br.com.ia.model.IaResponse;
+import br.com.ia.sdk.response.RespostaIA;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PendingIaRequestStore {
 
-	private final Map<String, CompletableFuture<IaResponse>> pending = new ConcurrentHashMap<>();
-	private final Map<String, LocalDateTime> timestamps = new ConcurrentHashMap<>();
+	private final Map<String, CompletableFuture<RespostaIA>> pending = new ConcurrentHashMap<>();
+	/** Guarda o instante de criação do Future em epoch millis. */
+	private final Map<String, Long> timestamps = new ConcurrentHashMap<>();
 
 	private ScheduledExecutorService cleanupScheduler;
 
-	@Value("${erp.ia.reply-timeout-ms:30000}")
+	@Value("${ia.pending.reply-timeout-ms:30000}")
 	private long defaultTimeoutMs;
 
-	@Value("${erp.ia.cleanup-interval-minutes:5}")
+	@Value("${ia.pending.cleanup-interval-minutes:5}")
 	private long cleanupIntervalMinutes;
 
-	@Value("${erp.ia.max-pending-requests:1000}")
+	@Value("${ia.pending.max-pending-requests:1000}")
 	private int maxPendingRequests;
 
 	@PostConstruct
 	public void init() {
-		// Inicializa scheduler para limpeza automática de requests órfãos
+		log.info("⚙️ Configuração PendingIaRequestStore carregada:");
+		log.info("   ➤ ia.pending.reply-timeout-ms         = {} ms", defaultTimeoutMs);
+		log.info("   ➤ ia.pending.cleanup-interval-minutes = {} min", cleanupIntervalMinutes);
+		log.info("   ➤ ia.pending.max-pending-requests     = {}", maxPendingRequests);
+
 		cleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
 			Thread t = new Thread(r, "PendingIaRequestStore-Cleanup");
 			t.setDaemon(true);
 			return t;
 		});
 
-		// Executa limpeza a cada X minutos
+		// limpeza periódica (atraso inicial = intervalo)
 		cleanupScheduler.scheduleWithFixedDelay(this::cleanupExpiredRequests, cleanupIntervalMinutes,
 				cleanupIntervalMinutes, TimeUnit.MINUTES);
 
@@ -64,244 +71,203 @@ public class PendingIaRequestStore {
 				Thread.currentThread().interrupt();
 			}
 		}
-
-		// Cancela todos os futures pendentes
 		cancelAllPending("Application shutdown");
-
 		log.info("🛑 PendingIaRequestStore destruído");
 	}
 
-	/**
-	 * Cria um novo CompletableFuture para aguardar resposta
-	 *
-	 * @param idChat ID do chat
-	 * @return CompletableFuture que será resolvido quando a resposta chegar
-	 */
-	public CompletableFuture<IaResponse> create(String idChat) {
-		if (idChat == null || idChat.trim().isEmpty()) {
-			throw new IllegalArgumentException("idChat não pode ser nulo ou vazio");
+	/** Cria (ou substitui) o future de um idRequest. */
+	public CompletableFuture<RespostaIA> create(Long idRequest) {
+		if (idRequest == null) {
+			throw new IllegalArgumentException("idRequest não pode ser nulo");
 		}
 
-		// Verifica limite de requests pendentes
 		if (pending.size() >= maxPendingRequests) {
-			log.warn("⚠️ Limite de requests pendentes atingido: {}", maxPendingRequests);
-			cleanupExpiredRequests(); // Tenta limpar expirados primeiro
-
+			log.warn("⚠️ Limite de requests pendentes atingido: {}. Tentando limpeza de expirados…",
+					maxPendingRequests);
+			cleanupExpiredRequests();
 			if (pending.size() >= maxPendingRequests) {
 				throw new IllegalStateException("Muitos requests pendentes: " + pending.size());
 			}
 		}
 
-		// Remove future anterior se existir (cleanup)
-		if (pending.containsKey(idChat)) {
-			log.warn("⚠️ Substituindo future existente para chatId: {}", idChat);
-			cancel(idChat);
+		final String key = idRequest.toString();
+
+		// Se já existe, cancela o anterior para não vazar Future
+		CompletableFuture<RespostaIA> previous = pending.remove(key);
+		if (previous != null && !previous.isDone()) {
+			previous.completeExceptionally(new RuntimeException("Request substituído por outro com mesmo id"));
+			log.warn("⚠️ Future existente substituído para idRequest: {}", idRequest);
 		}
+		timestamps.remove(key);
 
-		var future = new CompletableFuture<IaResponse>();
-		pending.put(idChat, future);
-		timestamps.put(idChat, LocalDateTime.now());
+		var future = new CompletableFuture<RespostaIA>();
+		pending.put(key, future);
+		timestamps.put(key, System.currentTimeMillis());
 
-		log.debug("📝 Future criado para chatId: {} (total pendentes: {})", idChat, pending.size());
+		log.debug("[PENDING-IA] Future criado para idRequest: {} (total pendentes: {})", idRequest, pending.size());
 		return future;
 	}
 
-	/**
-	 * Completa um future pendente com a resposta
-	 *
-	 * @param idChat   ID do chat
-	 * @param response Resposta da IA
-	 * @return true se havia um future pendente, false caso contrário
-	 */
-	public boolean complete(String idChat, IaResponse response) {
-		if (idChat == null) {
+	/** Completa o future e remove controles internos. */
+	public boolean complete(Long idRequest, RespostaIA response) {
+		if (idRequest == null)
 			return false;
-		}
 
-		var future = pending.remove(idChat);
-		timestamps.remove(idChat);
+		final String key = idRequest.toString();
+		var future = pending.remove(key);
+		timestamps.remove(key);
 
 		if (future != null) {
 			if (!future.isDone()) {
 				future.complete(response);
-				log.debug("✅ Future completado para chatId: {} (restantes: {})", idChat, pending.size());
+				log.debug("[PENDING-IA] ✅ Future completado para idRequest: {} (restantes: {})", idRequest,
+						pending.size());
 				return true;
 			} else {
-				log.warn("⚠️ Tentativa de completar future já finalizado: {}", idChat);
+				log.warn("[PENDING-IA] ⚠️ Tentativa de completar future já finalizado: {}", idRequest);
 				return false;
 			}
 		}
-
-		log.debug("❓ Tentativa de completar future inexistente: {}", idChat);
+		log.debug("[PENDING-IA] ❓ Tentativa de completar future inexistente: {}", idRequest);
 		return false;
 	}
 
-	/**
-	 * Completa um future pendente com erro
-	 *
-	 * @param idChat ID do chat
-	 * @param ex     Exceção ocorrida
-	 * @return true se havia um future pendente, false caso contrário
-	 */
-	public boolean fail(String idChat, Throwable ex) {
-		if (idChat == null) {
+	/** Falha o future e remove controles internos. */
+	public boolean fail(Long idRequest, Throwable ex) {
+		if (idRequest == null)
 			return false;
-		}
 
-		var future = pending.remove(idChat);
-		timestamps.remove(idChat);
+		final String key = idRequest.toString();
+		var future = pending.remove(key);
+		timestamps.remove(key);
 
 		if (future != null) {
 			if (!future.isDone()) {
-				future.completeExceptionally(ex);
-				log.debug("❌ Future falhado para chatId: {} - {}", idChat, ex.getMessage());
+				future.completeExceptionally(ex != null ? ex : new RuntimeException("Falha desconhecida"));
+				log.debug("[PENDING-IA] ❌ Future falhado para idRequest: {} - {}", idRequest,
+						ex != null ? ex.getMessage() : "(null)");
 				return true;
 			} else {
-				log.warn("⚠️ Tentativa de falhar future já finalizado: {}", idChat);
+				log.warn("[PENDING-IA] ⚠️ Tentativa de falhar future já finalizado: {}", idRequest);
 				return false;
 			}
 		}
-
-		log.debug("❓ Tentativa de falhar future inexistente: {}", idChat);
+		log.debug("[PENDING-IA] ❓ Tentativa de falhar future inexistente: {}", idRequest);
 		return false;
 	}
 
-	/**
-	 * Cancela um future pendente
-	 *
-	 * @param chatId ID do chat
-	 * @return true se havia um future pendente, false caso contrário
-	 */
-	public boolean cancel(String chatId) {
-		if (chatId == null) {
+	/** Cancela o future e remove controles internos. */
+	public boolean cancel(Long idRequest) {
+		if (idRequest == null)
 			return false;
-		}
 
-		var future = pending.remove(chatId);
-		timestamps.remove(chatId);
+		final String key = idRequest.toString();
+		var future = pending.remove(key);
+		timestamps.remove(key);
 
 		if (future != null) {
 			if (!future.isDone()) {
 				boolean cancelled = future.cancel(true);
-				log.debug("🚫 Future cancelado para chatId: {} (sucesso: {})", chatId, cancelled);
+				log.debug("[PENDING-IA] 🚫 Future cancelado para idRequest: {} (sucesso: {})", idRequest, cancelled);
 				return cancelled;
 			} else {
-				log.debug("⚠️ Tentativa de cancelar future já finalizado: {}", chatId);
+				log.debug("[PENDING-IA] ⚠️ Tentativa de cancelar future já finalizado: {}", idRequest);
 				return false;
 			}
 		}
-
-		log.debug("❓ Tentativa de cancelar future inexistente: {}", chatId);
+		log.debug("[PENDING-IA] ❓ Tentativa de cancelar future inexistente: {}", idRequest);
 		return false;
 	}
 
-	/**
-	 * Remove um future pendente sem completar (cleanup silencioso)
-	 *
-	 * @param idChat ID do chat
-	 * @return true se havia um future pendente, false caso contrário
-	 */
-	public boolean remove(String idChat) {
-		if (idChat == null) {
+	/** Remove o future e timestamp sem completar/cancelar. */
+	public boolean remove(Long idRequest) {
+		if (idRequest == null)
 			return false;
-		}
 
-		var future = pending.remove(idChat);
-		timestamps.remove(idChat);
+		final String key = idRequest.toString();
+		var future = pending.remove(key);
+		timestamps.remove(key);
 
 		if (future != null) {
-			log.debug("🗑️ Future removido para chatId: {}", idChat);
+			log.debug("[PENDING-IA] 🗑️ Future removido para idRequest: {}", idRequest);
 			return true;
 		}
 		return false;
 	}
 
-	/**
-	 * Verifica se existe um future pendente
-	 *
-	 * @param idChat ID do chat
-	 * @return true se existe, false caso contrário
-	 */
-	public boolean exists(String idChat) {
-		return idChat != null && pending.containsKey(idChat);
+	public boolean exists(Long idRequest) {
+		return idRequest != null && pending.containsKey(idRequest.toString());
 	}
 
-	/**
-	 * Retorna o número de requests pendentes
-	 *
-	 * @return número de futures pendentes
-	 */
 	public int size() {
 		return pending.size();
 	}
 
-	/**
-	 * Cancela todos os futures pendentes com uma mensagem específica
-	 *
-	 * @param reason Motivo do cancelamento
-	 */
+	/** Cancela todos os pendentes (completeExceptionally) e limpa estruturas. */
 	public void cancelAllPending(String reason) {
-		if (pending.isEmpty()) {
+		if (pending.isEmpty())
 			return;
-		}
 
-		log.warn("🚫 Cancelando {} futures pendentes. Motivo: {}", pending.size(), reason);
-
-		pending.forEach((chatId, future) -> {
+		log.warn("[PENDING-IA] 🚫 Cancelando {} futures pendentes. Motivo: {}", pending.size(), reason);
+		pending.forEach((idReq, future) -> {
 			if (!future.isDone()) {
 				future.completeExceptionally(new RuntimeException("Request cancelado: " + reason));
 			}
 		});
-
 		pending.clear();
 		timestamps.clear();
-
-		log.info("✅ Todos os futures foram cancelados");
+		log.info("[PENDING-IA] ✅ Todos os futures foram cancelados");
 	}
 
-	/**
-	 * Remove requests expirados (órfãos)
-	 */
+	/** Limpeza periódica de requests claramente “abandonados”. */
 	public void cleanupExpiredRequests() {
-		if (timestamps.isEmpty()) {
+		if (timestamps.isEmpty())
 			return;
-		}
 
-		LocalDateTime cutoff = LocalDateTime.now().minusSeconds(defaultTimeoutMs / 1000 * 2); // 2x timeout
+		final long now = System.currentTimeMillis();
+		final long cutoff = now - (defaultTimeoutMs * 2); // 2x timeout como margem
 		int removed = 0;
 
-		var iterator = timestamps.entrySet().iterator();
-		while (iterator.hasNext()) {
-			var entry = iterator.next();
-			String chatId = entry.getKey();
-			LocalDateTime timestamp = entry.getValue();
+		var it = timestamps.entrySet().iterator();
+		while (it.hasNext()) {
+			var entry = it.next();
+			final String idRequest = entry.getKey();
+			final long createdAt = entry.getValue();
 
-			if (timestamp.isBefore(cutoff)) {
-				var future = pending.get(chatId);
+			if (createdAt < cutoff) {
+				var future = pending.remove(idRequest);
 				if (future != null && !future.isDone()) {
 					future.completeExceptionally(new RuntimeException("Request expirado (timeout)"));
 				}
-
-				pending.remove(chatId);
-				iterator.remove();
+				it.remove();
 				removed++;
 			}
 		}
 
 		if (removed > 0) {
-			log.info("🧹 Limpeza automática: {} requests expirados removidos (restantes: {})", removed, pending.size());
+			log.info("[PENDING-IA] 🧹 Limpeza: {} requests expirados removidos (restantes: {})", removed,
+					pending.size());
 		}
 	}
 
-	/**
-	 * Retorna estatísticas do store
-	 *
-	 * @return Map com estatísticas
-	 */
+	/** Estatísticas rápidas para métricas/diagnóstico. */
 	public Map<String, Object> getStatistics() {
-		long completed = pending.values().stream().mapToLong(f -> f.isDone() ? 1L : 0L).sum();
+		long completed = pending.values().stream().filter(CompletableFuture::isDone).count();
+		long now = System.currentTimeMillis();
+		long oldestAgeMs = timestamps.values().stream().mapToLong(ts -> now - ts).max().orElse(0L);
 
 		return Map.of("totalPending", pending.size(), "completedButNotRemoved", completed, "activePending",
-				pending.size() - completed, "maxAllowed", maxPendingRequests, "defaultTimeoutMs", defaultTimeoutMs);
+				pending.size() - completed, "maxAllowed", maxPendingRequests, "defaultTimeoutMs", defaultTimeoutMs,
+				"oldestAgeMs", oldestAgeMs, "now", Instant.ofEpochMilli(now).toString());
+	}
+
+	/** Helper sem ruído de log “workspace”. */
+	public void completePendingRequest(Long idRequest, RespostaIA respostaIA) {
+		if (exists(idRequest)) {
+			complete(idRequest, respostaIA);
+			log.info("[PENDING-IA] *** COMPLETED PENDING FUTURE *** idRequest: {}", idRequest);
+		} else {
+			log.info("[PENDING-IA] Nenhum future pendente para idRequest: {} (processamento assíncrono)", idRequest);
+		}
 	}
 }

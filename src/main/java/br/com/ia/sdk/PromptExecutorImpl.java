@@ -8,22 +8,21 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import br.com.ia.instructions.IAServerInstructions;
 import br.com.ia.model.IaRequest;
 import br.com.ia.sdk.context.ContextShard;
 import br.com.ia.sdk.context.ContextShardDTOs;
 import br.com.ia.sdk.context.ContextShards;
+import br.com.ia.sdk.context.entity.LogIA;
+import br.com.ia.sdk.context.repository.LogIARepository;
 import br.com.ia.sdk.context.service.ShardService;
 import br.com.ia.sdk.exception.IAExecutionException;
 import br.com.ia.sdk.transport.PromptRequestPayload;
-import br.com.ia.utils.KafkaUtils;
-import br.com.ia.utils.SpringCloudUtils;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,16 +31,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PromptExecutorImpl implements PromptExecutor {
 
-	private static final String ERP_STABLE_SHARD_REF_ENABLED = "erp.ia.stable-shard-ref-enabled";
-	private static final String ERP_MAX_PROMPT_LENGTH = "erp.ia.max-prompt-length";
-	private static final String ERP_MAX_SHARD_TEXT_LENGTH = "erp.ia.max-shard-text-length";
-	private static final String ERP_MAX_PAYLOAD_SIZE = "erp.ia.max-payload-size";
 	private final ObjectMapper objectMapper;
 	private final ShardService shardService;
 	private final IAServerClient iaServerClient;
-	private final Environment env;
-	private final KafkaUtils kafkaUtils;
-	private final SpringCloudUtils springCloudUtils;
+	private final LogIARepository repository;
 
 	@Value("${erp.ia.max-payload-size:500000}")
 	private int maxPayloadSize;
@@ -57,24 +50,6 @@ public class PromptExecutorImpl implements PromptExecutor {
 	private boolean stableShardRefEnabled;
 
 	private String shardRemovalOrderCsv;
-
-	@PostConstruct
-	private void iniciaVariaveisAmbiente() {
-		log.info("================================================================");
-		log.info("=== Inicializando variáveis de ambiente ===");
-
-		// Verificar propriedades da aplicação
-		kafkaUtils.logConfigProperty(env, ERP_MAX_PAYLOAD_SIZE, String.valueOf(maxPayloadSize), "500000");
-		kafkaUtils.logConfigProperty(env, ERP_MAX_SHARD_TEXT_LENGTH, String.valueOf(maxShardTextLength), "2000");
-		kafkaUtils.logConfigProperty(env, ERP_MAX_PROMPT_LENGTH, String.valueOf(maxPromptLength), "5000");
-		kafkaUtils.logConfigProperty(env, ERP_STABLE_SHARD_REF_ENABLED, String.valueOf(stableShardRefEnabled), "false");
-
-		springCloudUtils.logSpringCloudConfiguration(env);
-		kafkaUtils.logKafkaProperties(env);
-
-		log.info("=== Variáveis de ambiente inicializadas com sucesso ===");
-		log.info("================================================================");
-	}
 
 	@Override
 	public boolean executaPrompt(PromptRequest request) throws IAExecutionException {
@@ -124,11 +99,27 @@ public class PromptExecutorImpl implements PromptExecutor {
 				request.getSchema(), IaRequest.MODULE_KEY, request.getModuleKey(), IaRequest.VERSAO_SCHEMA,
 				request.getSchemaVersion(), IaRequest.VERSAO_REGRAS_MODULO, request.getInstructions());
 
-		return IaRequest.builder().chatId(request.getChatId()).prompt(request.getPrompt()).options(options).build();
+		var req = new IaRequest();
+		req.setChatId(request.getChatId());
+		req.setPrompt(request.getPrompt());
+		req.setOptions(options);
+		criaLogIA(req);
+
+		return req;
+	}
+
+	private void criaLogIA(IaRequest request) {
+		var logIA = new LogIA();
+		logIA.setEnviado(false);
+		logIA.setIdChat(request.getChatId());
+		logIA.setPrompt(request.getPrompt());
+		repository.save(logIA);
+		request.setRequestId(logIA.getId());
 	}
 
 	private List<ContextShard> montarContextShards(PromptRequest request) {
 		var list = new ArrayList<ContextShard>();
+		list.add(IAServerInstructions.getShard());
 		list.add(request.getShardInstrucao());
 		list.add(request.getShardObjetivo());
 		list.add(request.getShardEscopo());

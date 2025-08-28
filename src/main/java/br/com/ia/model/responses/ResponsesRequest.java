@@ -282,9 +282,9 @@ public class ResponsesRequest {
     private String effort;
   }
 
-  public enum Truncation { auto, disabled }
+  public enum Truncation { AUTO, DISABLED }
 
-  public enum Verbosity { low, medium, high }
+  public enum Verbosity { LOW, MEDIUM, HIGH }
 
   /**
    * Camadas suportadas na Responses API.
@@ -292,9 +292,9 @@ public class ResponsesRequest {
    */
   public enum ServiceTier {
     @JsonProperty("flex")
-    flex,
+    FLEX,
 
     @JsonProperty("priority")
-    priority
+    PRIORITY
   }
 }

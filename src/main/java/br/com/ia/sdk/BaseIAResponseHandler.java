@@ -1,13 +1,21 @@
 package br.com.ia.sdk;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import br.com.ia.config.IaServerProperties;
+import br.com.ia.sdk.context.entity.LogIA;
+import br.com.ia.sdk.context.repository.LogIARepository;
+import br.com.ia.sdk.response.AcaoIA;
+import br.com.ia.sdk.response.RespostaIA;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -17,10 +25,12 @@ import lombok.extern.slf4j.Slf4j;
  * from IAServer. Place this in the SDK package (br.com.ia.sdk) to be shared
  * across all modules.
  * 
- * Usage: </br></br>
+ * Usage: </br>
+ * </br>
  * 1. Workspace: WorkspaceIaResponseHandler extends BaseIAResponseHandler </br>
  * 2. Marketing: MarketingIaResponseHandler extends BaseIAResponseHandler </br>
- * 3. ERP: ErpIaResponseHandler extends BaseIAResponseHandler</br></br>
+ * 3. ERP: ErpIaResponseHandler extends BaseIAResponseHandler</br>
+ * </br>
  * 
  * Each module implements its own @Bean iaReplies() function that calls
  * processResponse()
@@ -28,16 +38,22 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public abstract class BaseIAResponseHandler {
 
-	protected final ObjectMapper objectMapper;
+	private static final String UNKNOWN = "unknown";
 
-	@Value("${ia.base64.wrapper.enabled:true}")
-	protected boolean base64WrapperEnabled;
-
-	@Value("${spring.application.name:unknown-module}")
+	@Value("${ia.module.name:${spring.application.name:workspace}}")
 	protected String moduleName;
 
-	protected BaseIAResponseHandler(ObjectMapper objectMapper) {
+	protected final ObjectMapper objectMapper;
+	private final LogIARepository repository;
+
+	protected final boolean base64WrapperEnabled;
+
+	protected BaseIAResponseHandler(ObjectMapper objectMapper, LogIARepository repository, IaServerProperties props) {
 		this.objectMapper = objectMapper;
+		this.repository = repository;
+		this.base64WrapperEnabled = props.isBase64WrapperEnabled();
+		this.moduleName = props.getModuleName();
+
 		log.info("[BASE-IA-HANDLER] Initialized for module: {}, Base64 enabled: {}", moduleName, base64WrapperEnabled);
 	}
 
@@ -50,6 +66,7 @@ public abstract class BaseIAResponseHandler {
 	 * @Bean public Function<String, Void> iaReplies() { return response -> {
 	 *       processResponse(response); return null; }; }
 	 */
+	@SuppressWarnings("unchecked")
 	public void processResponse(String response) {
 		try {
 			if (log.isDebugEnabled()) {
@@ -79,7 +96,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void routeResponse(Map<String, Object> response) {
 		String responseType = (String) response.getOrDefault("type", "UNKNOWN");
-		String sourceModule = (String) response.getOrDefault("module", "unknown");
+		String sourceModule = (String) response.getOrDefault("module", UNKNOWN);
 		Long timestamp = (Long) response.getOrDefault("timestamp", 0L);
 
 		log.debug("[ROUTE-RESPONSE] Type: {}, Source: {}, Target: {}, Timestamp: {}", responseType, sourceModule,
@@ -103,41 +120,46 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void handleIaResponse(Map<String, Object> response) {
 		try {
-			Object payload = response.get("payload");
-			if (!(payload instanceof Map)) {
-				log.error("[IA-RESPONSE] Invalid payload structure in response");
+			Long idRequest = (Long) response.get("idRequest");
+
+			if (idRequest == null) {
+				log.error("idRequest inválido!");
 				return;
 			}
 
-			@SuppressWarnings("unchecked")
-			Map<String, Object> iaResponseData = (Map<String, Object>) payload;
+			String resposta = (String) response.get("resposta");
+			Boolean success = (Boolean) response.getOrDefault("success", false);
+			String erro = (String) response.get("erro");
+			String resumo = (String) response.get("resumo");
 
-			String chatId = (String) iaResponseData.get("chatId");
-			String resposta = (String) iaResponseData.get("resposta");
-			Boolean success = (Boolean) iaResponseData.getOrDefault("success", false);
+			@SuppressWarnings("unchecked")
+			List<AcaoIA> acoes = (List<AcaoIA>) response.get("acoes");
 
 			// Extract additional fields from IAServer response
-			Object custo = iaResponseData.get("custo");
-			String modelo = (String) iaResponseData.get("modelo");
-			Object tokensPrompt = iaResponseData.get("tokensPrompt");
-			Object tokensResposta = iaResponseData.get("tokensResposta");
+			String modelo = (String) response.getOrDefault("modelo", UNKNOWN);
+			Number tokensPromptNum = (Number) response.getOrDefault("tokensPrompt", 0);
+			Number tokensRespostaNum = (Number) response.getOrDefault("tokensResposta", 0);
+			Number custoNum = (Number) response.getOrDefault("custo", 0);
+
+			int tokensPrompt = tokensPromptNum != null ? tokensPromptNum.intValue() : 0;
+			int tokensResposta = tokensRespostaNum != null ? tokensRespostaNum.intValue() : 0;
+			BigDecimal custo = custoNum != null ? BigDecimal.valueOf(custoNum.doubleValue()) : BigDecimal.ZERO;
 
 			if (Boolean.TRUE.equals(success)) {
-				log.info("[IA-RESPONSE] SUCCESS - ChatId: {}, Model: {}, Response length: {}", chatId, modelo,
+				log.info("[IA-RESPONSE] SUCCESS - Id: {}, Model: {}, Response length: {}", idRequest, modelo,
 						resposta != null ? resposta.length() : 0);
 
 				if (log.isDebugEnabled()) {
-					log.debug("[IA-RESPONSE] Cost: {}, Prompt tokens: {}, Response tokens: {}", custo, tokensPrompt,
-							tokensResposta);
+					log.debug("[IA-RESPONSE] Prompt tokens: {}, Response tokens: {}", tokensPrompt, tokensResposta);
 				}
 
-				onSuccessfulIaResponse(chatId, resposta, iaResponseData);
+				RespostaIA respostaIA = new RespostaIA(idRequest, modelo, erro, tokensPrompt, tokensResposta, resumo,
+						custo, null, acoes);
+
+				onSuccessfulIaResponse(respostaIA, resposta);
 
 			} else {
-				String errorMessage = (String) iaResponseData.get("errorMessage");
-				log.error("[IA-RESPONSE] ERROR - ChatId: {}, Error: {}", chatId, errorMessage);
-
-				onIaError(chatId, errorMessage, iaResponseData);
+				onIaError(idRequest, response);
 			}
 
 		} catch (Exception e) {
@@ -149,8 +171,8 @@ public abstract class BaseIAResponseHandler {
 	 * Handles PROCESSING_RESPONSE - IAServer internal status messages
 	 */
 	protected void handleProcessingResponse(Map<String, Object> response) {
-		String status = (String) response.getOrDefault("status", "unknown");
-		String reason = (String) response.getOrDefault("reason", "unknown");
+		String status = (String) response.getOrDefault("status", UNKNOWN);
+		String reason = (String) response.getOrDefault("reason", UNKNOWN);
 		String message = (String) response.getOrDefault("message", "");
 
 		log.info("[PROCESSING-RESPONSE] Status: {}, Reason: {}, Module: {}", status, reason, moduleName);
@@ -179,7 +201,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void handleErrorResponse(Map<String, Object> response) {
 		String message = (String) response.getOrDefault("message", "Unknown error");
-		String reason = (String) response.getOrDefault("reason", "unknown");
+		String reason = (String) response.getOrDefault("reason", UNKNOWN);
 
 		log.error("[ERROR-RESPONSE] IAServer error to {}: {} (Reason: {})", moduleName, message, reason);
 
@@ -219,7 +241,7 @@ public abstract class BaseIAResponseHandler {
 		try {
 			if (!base64WrapperEnabled) {
 				log.debug("[UNWRAP-BASE64] Base64 wrapper disabled, using plain JSON");
-				return null;
+				return null; // NOSONAR
 			}
 
 			// Decode Base64
@@ -239,10 +261,10 @@ public abstract class BaseIAResponseHandler {
 
 		} catch (IllegalArgumentException e) {
 			log.debug("[UNWRAP-BASE64] Not valid Base64 in {}: {}", moduleName, e.getMessage());
-			return null;
+			return null; // NOSONAR
 		} catch (Exception e) {
 			log.warn("[UNWRAP-BASE64] Failed to unwrap Base64 in {}: {}", moduleName, e.getMessage());
-			return null;
+			return null; // NOSONAR
 		}
 	}
 
@@ -253,18 +275,52 @@ public abstract class BaseIAResponseHandler {
 	/**
 	 * Called when IA processing succeeds - IMPLEMENT IN MODULE HANDLER
 	 */
-	protected abstract void onSuccessfulIaResponse(String chatId, String resposta, Map<String, Object> fullResponse);
+	protected void onSuccessfulIaResponse(RespostaIA respostaIA, String resposta) {
+		LogIA logIA = repository.findById(respostaIA.idRequest()).orElseThrow();
+
+		BigDecimal custo = logIA.getCusto();
+		if (custo == null) {
+			custo = BigDecimal.ZERO;
+		}
+
+		// acumula o custo no caso de reenvio
+		custo = custo.add(respostaIA.custo());
+
+		var fim = LocalDateTime.now();
+		var duration = java.time.Duration.between(logIA.getData(), fim).toMillis();
+		logIA.setDuracaoExecucaoMs(duration);
+		logIA.setResposta(resposta);
+		logIA.setCusto(custo);
+		logIA.setErro(null);
+		logIA.setErrorMessage(null);
+		logIA.setSucesso(true);
+		logIA.setTokensPrompt(respostaIA.tokensPrompt());
+		logIA.setTokensResposta(respostaIA.tokensResposta());
+		repository.save(logIA);
+	}
 
 	/**
 	 * Called when IA processing fails - IMPLEMENT IN MODULE HANDLER
 	 */
-	protected abstract void onIaError(String chatId, String errorMessage, Map<String, Object> fullResponse);
+	protected void onIaError(long idRequest, Map<String, Object> response) {
+		String erro = (String) response.get("erro");
+		String errorMessage = (String) response.get("errorMessage");
+		log.error("[IA-RESPONSE] ERROR - Id: {}, Error: {}", idRequest, errorMessage);
+		log.error("[IA-RESPONSE] ERROR - Id: {}, Error: {}", idRequest, erro);
+
+		LogIA logIA = repository.findById(idRequest).orElseThrow();
+		logIA.setErro(erro);
+		logIA.setErrorMessage(errorMessage);
+		repository.save(logIA);
+	}
 
 	/**
 	 * Called for processing status ignored - OVERRIDE IF NEEDED
 	 */
 	protected void onProcessingIgnored(String reason, String message, Map<String, Object> fullResponse) {
 		log.debug("[IGNORED-HANDLER] Default implementation - Reason: {}", reason);
+		log.debug("[IGNORED-HANDLER] Default implementation - Message: {}", message);
+		log.debug("[IGNORED-HANDLER] Default implementation - fullResponse: {}", fullResponse);
 		// Override in module handler if needed
 	}
 
@@ -273,6 +329,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onProcessingError(String reason, String message, Map<String, Object> fullResponse) {
 		log.warn("[PROCESSING-ERROR] Default implementation - Reason: {}, Message: {}", reason, message);
+		log.warn("[PROCESSING-ERROR] Default implementation - fullResponse: {}", fullResponse);
 		// Override in module handler if needed
 	}
 
@@ -281,6 +338,9 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onProcessingStatus(String status, String reason, String message, Map<String, Object> fullResponse) {
 		log.info("[STATUS-HANDLER] Default implementation - Status: {}", status);
+		log.info("[STATUS-HANDLER] Default implementation - reason: {}", reason);
+		log.info("[STATUS-HANDLER] Default implementation - message: {}", message);
+		log.info("[STATUS-HANDLER] Default implementation - fullResponse: {}", fullResponse);
 		// Override in module handler if needed
 	}
 
@@ -289,6 +349,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onGeneralError(String errorMessage, Map<String, Object> fullResponse) {
 		log.error("[GENERAL-ERROR] Default implementation - Error: {}", errorMessage);
+		log.error("[GENERAL-ERROR] Default implementation - fullResponse: {}", fullResponse);
 		// Override in module handler if needed
 	}
 
@@ -297,6 +358,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onStartupTest(Map<String, Object> response) {
 		log.info("[STARTUP-TEST] Default implementation");
+		log.info("[STARTUP-TEST] Default implementation {} ", response);
 		// Override in module handler if needed
 	}
 
@@ -305,6 +367,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onConnectionTest(Map<String, Object> response) {
 		log.info("[CONNECTION-TEST] Default implementation");
+		log.info("[CONNECTION-TEST] Default implementation {} ", response);
 		// Override in module handler if needed
 	}
 
@@ -313,6 +376,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onUnknownResponse(Map<String, Object> response) {
 		log.warn("[UNKNOWN-RESPONSE] Default implementation");
+		log.warn("[UNKNOWN-RESPONSE] Default implementation {} ", response);
 		// Override in module handler if needed
 	}
 
@@ -321,6 +385,7 @@ public abstract class BaseIAResponseHandler {
 	 */
 	protected void onProcessingException(String originalResponse, Exception e) {
 		log.error("[PROCESSING-EXCEPTION] Default implementation - Error: {}", e.getMessage());
+		log.error("[PROCESSING-EXCEPTION] Default implementation - originalResponse: {}", originalResponse);
 		// Override in module handler if needed
 	}
 }

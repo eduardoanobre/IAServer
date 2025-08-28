@@ -78,7 +78,7 @@ public class IaResponse {
 	 */
 	public static IaResponse success(String chatId, String resposta, BigDecimal custo, String modelo, int tokensPrompt,
 			int tokensResposta) {
-		IaResponse response = new IaResponse();
+		var response = new IaResponse();
 		response.setChatId(chatId);
 		response.setResposta(resposta);
 		response.setCusto(custo);
@@ -93,7 +93,7 @@ public class IaResponse {
 	 * Cria uma resposta de erro
 	 */
 	public static IaResponse error(String chatId, String errorMessage, String errorCode) {
-		IaResponse response = new IaResponse();
+		var response = new IaResponse();
 		response.setChatId(chatId);
 		response.setResposta(errorMessage);
 		response.setCusto(BigDecimal.ZERO);

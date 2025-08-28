@@ -3,6 +3,7 @@ package br.com.ia.utils;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
+import br.com.ia.model.enums.ModeloIA;
 import lombok.experimental.UtilityClass;
 
 @UtilityClass
@@ -14,8 +15,8 @@ public class OpenAICustoUtil {
 		BigDecimal respostaMil = BigDecimal.valueOf(tokensResposta).divide(BigDecimal.valueOf(1000), 6,
 				RoundingMode.HALF_UP);
 
-		BigDecimal custoPrompt = promptMil.multiply(ModelPricing.promptPricePer1k(modelo));
-		BigDecimal custoResposta = respostaMil.multiply(ModelPricing.outputPricePer1k(modelo));
+		BigDecimal custoPrompt = promptMil.multiply(ModeloIA.promptPricePer1k(modelo));
+		BigDecimal custoResposta = respostaMil.multiply(ModeloIA.outputPricePer1k(modelo));
 
 		return custoPrompt.add(custoResposta).setScale(5, RoundingMode.HALF_UP);
 	}

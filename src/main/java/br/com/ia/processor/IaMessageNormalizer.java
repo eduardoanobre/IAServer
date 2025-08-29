@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,10 @@ public class IaMessageNormalizer {
 	public Map<String, Object> normalize(Object input) {
 		try {
 			Object in = input;
+
+			if (input instanceof ConsumerRecord<?, ?> value) {
+				in = value.value();
+			}
 
 			if (in instanceof byte[] bytes) {
 				in = new String(bytes, StandardCharsets.UTF_8);

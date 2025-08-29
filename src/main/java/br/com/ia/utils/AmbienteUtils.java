@@ -20,7 +20,6 @@ import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.stereotype.Component;
 
-import br.com.ia.config.IaServerProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -29,8 +28,15 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AmbienteUtils {
 
+    private static final String SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION =
+            "spring.cloud.stream.bindings.iaReplies-out-0.destination";
+    private static final String SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_GROUP =
+            "spring.cloud.stream.bindings.processIaConsumer-in-0.group";
+    private static final String SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_DESTINATION =
+            "spring.cloud.stream.bindings.processIaConsumer-in-0.destination";
+    private static final String SPRING_KAFKA_BOOTSTRAP_SERVERS = "spring.kafka.bootstrap-servers";
+
     private final Environment env;
-    private final IaServerProperties props;
 
     private final ObjectProvider<KafkaTemplate<byte[], byte[]>> kafkaTemplateProvider;
     private final ObjectProvider<KafkaProperties> kafkaPropertiesProvider;
@@ -42,11 +48,30 @@ public class AmbienteUtils {
     // ====== API pública ======
     public void logSpringCloudConfiguration() {
 
-        boolean serverEnabled = props.isServerEnabled();
+        boolean serverEnabled = getBoolean("ia.server.enabled", true);
 
         log.info("╔═════════════════════════════════════════════════════════════════════════════╗");
         log.info("║                       SPRING CLOUD STREAM CONFIGURATION                     ║");
         log.info("╚═════════════════════════════════════════════════════════════════════════════╝");
+
+        log.info("🔧 IAServer – snapshot de configuração:");
+        log.info("   spring.kafka.bootstrap-servers = {}", env.getProperty(SPRING_KAFKA_BOOTSTRAP_SERVERS));
+        log.info("   function.definition            = {}", env.getProperty("spring.cloud.function.definition"));
+        log.info("   stream.fn.definition           = {}", env.getProperty("spring.cloud.stream.function.definition"));
+        log.info("   input.binding                  = processIaConsumer-in-0");
+        log.info("   input.destination              = {}", env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_DESTINATION));
+        log.info("   input.group                    = {}", env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_GROUP));
+        log.info("   output.binding                 = iaReplies-out-0");
+        log.info("   output.destination             = {}", env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION));
+        log.info("   output.required-groups         = {}",
+                env.getProperty("spring.cloud.stream.bindings.iaReplies-out-0.producer.requiredGroups",
+                        env.getProperty("spring.cloud.stream.bindings.iaReplies-out-0.producer.required-groups")));
+        log.info("   ia.module.name                 = {}", env.getProperty("ia.module.name"));
+        log.info("   ia.processing.request-timeout  = {} ms", env.getProperty("ia.processing.request-timeout-ms"));
+        log.info("   ia.pending.reply-timeout       = {} ms", env.getProperty("ia.pending.reply-timeout-ms"));
+        log.info("   ia.pending.cleanup-interval    = {} min", env.getProperty("ia.pending.cleanup-interval-minutes"));
+        log.info("   ia.pending.max-pending         = {}", env.getProperty("ia.pending.max-pending-requests"));
+
         logApplicationInfo();
 
         if (serverEnabled) {
@@ -85,8 +110,8 @@ public class AmbienteUtils {
         log.info("   ├─ Porta: {}", port);
         log.info("   ├─ Encoding: {}", encoding);
         log.info("   ├─ ia.module.name: {}", env.getProperty("ia.module.name", "N/I"));
-        log.info("   ├─ ia.server.enabled: {}", props.isServerEnabled());
-        log.info("   └─ ia.client.enabled: {}", props.isClientEnabled());
+        log.info("   ├─ ia.server.enabled: {}", String.valueOf(getBoolean("ia.server.enabled", true)));
+        log.info("   └─ ia.client.enabled: {}", String.valueOf(getBoolean("ia.client.enabled", true)));
         log.info("");
     }
 
@@ -95,7 +120,7 @@ public class AmbienteUtils {
     // =========================================
     private void logKafkaBrokerConfigurationFromBinder() {
         log.info("🌐 KAFKA BROKER CONFIGURATION (Binder):");
-        logLine("   ├─ Brokers", orNI(env.getProperty("spring.kafka.bootstrap-servers")));
+        logLine("   ├─ Brokers", orNI(env.getProperty(SPRING_KAFKA_BOOTSTRAP_SERVERS)));
         logLine("   ├─ Auto Create Topics", prop("spring.cloud.stream.kafka.binder.autoCreateTopics"));
         logLine("   ├─ Auto Add Partitions", prop("spring.cloud.stream.kafka.binder.autoAddPartitions"));
         logLine("   ├─ Required Acks", prop("spring.cloud.stream.kafka.binder.requiredAcks"));
@@ -114,8 +139,8 @@ public class AmbienteUtils {
 
     private void logInputBindingDetailsFromBinder() {
         log.info("📥 INPUT BINDING (processIaConsumer-in-0):");
-        logLine("   ├─ Destination", prop("spring.cloud.stream.bindings.processIaConsumer-in-0.destination"));
-        logLine("   ├─ Group",       prop("spring.cloud.stream.bindings.processIaConsumer-in-0.group"));
+        logLine("   ├─ Destination", prop(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_DESTINATION));
+        logLine("   ├─ Group",       prop(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_GROUP));
         logLine("   ├─ Concurrency", prop("spring.cloud.stream.bindings.processIaConsumer-in-0.consumer.concurrency"));
         logLine("   └─ Content Type",prop("spring.cloud.stream.bindings.processIaConsumer-in-0.content-type"));
         log.info("");
@@ -123,7 +148,7 @@ public class AmbienteUtils {
 
     private void logOutputBindingDetailsFromBinder() {
         log.info("📤 OUTPUT BINDING (iaReplies-out-0):");
-        logLine("   ├─ Destination Topic", prop("spring.cloud.stream.bindings.iaReplies-out-0.destination"));
+        logLine("   ├─ Destination Topic", prop(SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION));
         logLine("   ├─ Content Type",      prop("spring.cloud.stream.bindings.iaReplies-out-0.content-type"));
         logLine("   ├─ Partition Count",   prop("spring.cloud.stream.bindings.iaReplies-out-0.producer.partitionCount"));
         logLine("   └─ Required Groups",   prop("spring.cloud.stream.bindings.iaReplies-out-0.producer.requiredGroups"));
@@ -195,7 +220,7 @@ public class AmbienteUtils {
                         String.valueOf(Integer.MAX_VALUE)
                 ));
 
-        // linger.ms (sem getter no Boot 3.2)
+        // linger.ms
         logLine("   │  ├─ linger.ms",
                 firstNonBlank(
                         val(prod, ProducerConfig.LINGER_MS_CONFIG),
@@ -272,7 +297,7 @@ public class AmbienteUtils {
                         "true"
                 ));
 
-        // max.poll.records (Kafka default ~500; Boot frequentemente usa 500)
+        // max.poll.records
         logLine("      ├─ max.poll.records",
                 firstNonBlank(
                         val(cons, ConsumerConfig.MAX_POLL_RECORDS_CONFIG),
@@ -282,7 +307,7 @@ public class AmbienteUtils {
                         "500"
                 ));
 
-        // max.poll.interval.ms (default 300000)
+        // max.poll.interval.ms
         logLine("      ├─ max.poll.interval.ms",
                 firstNonBlank(
                         val(cons, ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
@@ -291,7 +316,7 @@ public class AmbienteUtils {
                         "300000"
                 ));
 
-        // session.timeout.ms (default 45000)
+        // session.timeout.ms
         logLine("      ├─ session.timeout.ms",
                 firstNonBlank(
                         val(cons, ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
@@ -300,7 +325,7 @@ public class AmbienteUtils {
                         "45000"
                 ));
 
-        // heartbeat.interval.ms (default 3000)
+        // heartbeat.interval.ms
         logLine("      └─ heartbeat.interval.ms",
                 firstNonBlank(
                         val(cons, ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG),
@@ -392,7 +417,9 @@ public class AmbienteUtils {
             }
         }
         for (ConcurrentMessageListenerContainer<?, ?> c : listenerContainersProvider) {
-            return Optional.of(c);
+            if (c != null) {  
+                return Optional.of(c);
+            }
         }
         return Optional.empty();
     }
@@ -428,11 +455,11 @@ public class AmbienteUtils {
     // =========================================
     private void logIaProcessingConfiguration() {
         log.info("🤖 IA PROCESSING CONFIGURATION:");
-        logLine("   ├─ Request Timeout (ms)", String.valueOf(props.getProcessingRequestTimeoutMs()));
-        logLine("   ├─ Pending Reply Timeout (ms)", String.valueOf(props.getPendingReplyTimeoutMs()));
-        logLine("   ├─ Pending Cleanup Interval (min)", String.valueOf(props.getPendingCleanupIntervalMinutes()));
-        logLine("   ├─ Pending Max Requests", String.valueOf(props.getPendingMaxPendingRequests()));
-        logLine("   └─ Base64 Wrapper Enabled", String.valueOf(props.isBase64WrapperEnabled()));
+        logLine("   ├─ Request Timeout (ms)",   String.valueOf(getLong("ia.processing.request-timeout-ms", 300_000L)));
+        logLine("   ├─ Pending Reply Timeout (ms)", String.valueOf(getLong("ia.pending.reply-timeout-ms", 30_000L)));
+        logLine("   ├─ Pending Cleanup Interval (min)", String.valueOf(getLong("ia.pending.cleanup-interval-minutes", 5L)));
+        logLine("   ├─ Pending Max Requests",   String.valueOf(getInt("ia.pending.max-pending-requests", 1000)));
+        logLine("   └─ Base64 Wrapper Enabled", String.valueOf(getBoolean("ia.base64-wrapper-enabled", true)));
         log.info("");
     }
 
@@ -453,7 +480,7 @@ public class AmbienteUtils {
         if (kp != null && kp.getBootstrapServers() != null && !kp.getBootstrapServers().isEmpty()) {
             brokers = String.join(",", kp.getBootstrapServers());
         } else {
-            String b = env.getProperty("spring.kafka.bootstrap-servers");
+            String b = env.getProperty(SPRING_KAFKA_BOOTSTRAP_SERVERS);
             if (notBlank(b)) brokers = b;
         }
 
@@ -461,17 +488,24 @@ public class AmbienteUtils {
         String outputTopic;
 
         if (serverEnabled) {
-            inputTopic  = orNI(env.getProperty("spring.cloud.stream.bindings.processIaConsumer-in-0.destination"));
-            outputTopic = orNI(env.getProperty("spring.cloud.stream.bindings.iaReplies-out-0.destination"));
+            inputTopic  = orNI(env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_DESTINATION));
+            outputTopic = orNI(env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION));
         } else {
-            inputTopic  = firstListenerTopic().orElse(orNI(props.getKafkaTopicResponses())); // consumindo respostas
-            outputTopic = orNI(props.getKafkaTopicRequests());                               // produzindo requests
+            // CLIENT: consome respostas e produz requests
+            inputTopic  = firstListenerTopic().orElse(orNI(topicResponses()));
+            outputTopic = orNI(topicRequests());
         }
 
-        String group = serverEnabled
-                ? orNI(env.getProperty("spring.cloud.stream.bindings.processIaConsumer-in-0.group"))
-                : orNI(firstListenerGroup().orElse(groupIdEffective(cf != null ? cf.getConfigurationProperties() : Map.of())));
-
+        String group;
+        if (serverEnabled) {
+            group = orNI(env.getProperty("SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_GROUP"));
+        } else {
+            Map<String, Object> configProperties = (cf != null) ? cf.getConfigurationProperties() : Map.of();
+            String effectiveGroupId = groupIdEffective(configProperties);
+            String fallbackGroup = firstListenerGroup().orElse(effectiveGroupId);
+            group = orNI(fallbackGroup);
+        }
+        
         String partitions = serverEnabled
                 ? orNI(env.getProperty("spring.cloud.stream.bindings.iaReplies-out-0.producer.partitionCount"))
                 : "N/I";
@@ -588,12 +622,13 @@ public class AmbienteUtils {
     private String cell(String content, int width) {
         return "│" + pad(content, width) + "│";
     }
-    
+
     private String fromProducerProps(KafkaProperties kp, String key) {
         if (kp == null || kp.getProducer() == null) return null;
         Object v = kp.getProducer().getProperties().get(key);
         return v != null ? String.valueOf(v) : null;
     }
+
     private String envAny(String... keys) {
         for (String k : keys) {
             String v = env.getProperty(k);
@@ -601,7 +636,7 @@ public class AmbienteUtils {
         }
         return null;
     }
-    
+
     private String fromConsumerProps(KafkaProperties kp, String key) {
         if (kp == null || kp.getConsumer() == null) return null;
         Object v = kp.getConsumer().getProperties().get(key);
@@ -612,4 +647,29 @@ public class AmbienteUtils {
     private String intToStr(Integer i)  { return i == null ? null : String.valueOf(i); }
     private String topCell(int width)    { return "┌" + "─".repeat(width) + "┐"; }
     private String bottomCell(int width) { return "└" + "─".repeat(width) + "┘"; }
+
+    // ===== Helpers de leitura tipada do Environment =====
+    private boolean getBoolean(String key, boolean def) {
+        Boolean v = env.getProperty(key, Boolean.class);
+        return v != null ? v : def;
+    }
+    private long getLong(String key, long def) {
+        Long v = env.getProperty(key, Long.class);
+        return v != null ? v : def;
+    }
+    private int getInt(String key, int def) {
+        Integer v = env.getProperty(key, Integer.class);
+        return v != null ? v : def;
+    }
+
+    // ===== Tópicos padrão quando não estiverem presentes no binder =====
+    private String topicRequests() {
+        // Preferir o destino configurado no binder (mesmo em client mode)
+        String t = env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_DESTINATION);
+        return notBlank(t) ? t : "ia.requests";
+    }
+    private String topicResponses() {
+        String t = env.getProperty(SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION);
+        return notBlank(t) ? t : "ia.responses";
+    }
 }

@@ -1,5 +1,5 @@
-org.springframework.boot.env.EnvironmentPostProcessor=\
-br.com.ia.config.IaFunctionDefinitionEPP
-
 org.springframework.context.ApplicationListener=\
 br.com.ia.config.FunctionDefinitionWatchdog
+
+org.springframework.boot.env.EnvironmentPostProcessor=\
+br.com.ia.config.IaEnvironmentOverrides

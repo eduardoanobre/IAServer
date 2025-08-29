@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class IaResponse {
 
+	private String id;
 	private String chatId;
 	private String resposta;
 
@@ -76,10 +77,10 @@ public class IaResponse {
 	/**
 	 * Cria uma resposta de sucesso
 	 */
-	public static IaResponse success(String chatId, String resposta, BigDecimal custo, String modelo, int tokensPrompt,
+	public static IaResponse success(String id, String resposta, BigDecimal custo, String modelo, int tokensPrompt,
 			int tokensResposta) {
 		var response = new IaResponse();
-		response.setChatId(chatId);
+		response.setId(id);
 		response.setResposta(resposta);
 		response.setCusto(custo);
 		response.setModelo(modelo);
@@ -92,9 +93,9 @@ public class IaResponse {
 	/**
 	 * Cria uma resposta de erro
 	 */
-	public static IaResponse error(String chatId, String errorMessage, String errorCode) {
+	public static IaResponse error(String id, String errorMessage, String errorCode) {
 		var response = new IaResponse();
-		response.setChatId(chatId);
+		response.setId(id);
 		response.setResposta(errorMessage);
 		response.setCusto(BigDecimal.ZERO);
 		response.setModelo("erro");
@@ -107,8 +108,8 @@ public class IaResponse {
 	/**
 	 * Cria uma resposta de erro (sem código)
 	 */
-	public static IaResponse error(String chatId, String errorMessage) {
-		return error(chatId, errorMessage, null);
+	public static IaResponse error(String id, String errorMessage) {
+		return error(id, errorMessage, null);
 	}
 
 	/**

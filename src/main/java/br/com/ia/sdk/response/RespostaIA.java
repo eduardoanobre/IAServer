@@ -4,13 +4,13 @@ import java.math.BigDecimal;
 import java.util.List;
 
 public record RespostaIA(
-	Long idRequest,
-	String modelo,
+	String id,
+	br.com.ia.model.enums.ModeloIA modelo,
 	String erro,
 	Integer tokensPrompt,
 	Integer tokensResposta,
     String resumo,
     BigDecimal custo,
-    String errorMessage,
+    String resposta,
     List<AcaoIA> acoes
 ) {}

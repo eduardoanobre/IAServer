@@ -24,9 +24,13 @@ public class IaMessageClassifier {
 		if (envelopeType != null) {
 			log.debug("[CLASSIFIER] Found envelope type: {}", envelopeType);
 
+			if (MessageType.IA_RESPONSE.name().equals(envelopeType)) {
+				return MessageType.IA_RESPONSE;
+			}
+
 			if (IGNORED_ENVELOPE_TYPES.contains(envelopeType)) {
 				log.warn("[CLASSIFIER] {} detected – prevent loop", envelopeType);
-				return MessageType.IA_RESPONSE_LOOP;
+				return MessageType.PROCESSED;
 			}
 
 			Object p = input.get("payload");
@@ -43,7 +47,7 @@ public class IaMessageClassifier {
 
 		if (hasResponseSignature(payload)) {
 			log.warn("[CLASSIFIER] Response signature detected – loop prevention");
-			return MessageType.IA_RESPONSE_LOOP;
+			return MessageType.PROCESSED;
 		}
 
 		String source = String.valueOf(payload.getOrDefault("source", ""));
@@ -52,16 +56,11 @@ public class IaMessageClassifier {
 			return MessageType.STARTUP_TEST;
 		}
 
-		String chatId = String.valueOf(payload.getOrDefault("chatId", ""));
-		if (chatId.startsWith("test-") || payload.containsKey("test") || source.contains("connection-test")) {
-			return MessageType.CONNECTION_TEST;
-		}
-
 		if (hasValidIaRequestStructure(payload)) {
 			return MessageType.IA_REQUEST;
 		}
 
-		return MessageType.UNKNOWN;
+		return MessageType.PROCESSED;
 	}
 
 	private boolean hasResponseSignature(Map<String, Object> input) {
@@ -79,8 +78,7 @@ public class IaMessageClassifier {
 		return switch (envelopeType) {
 		case "IA_REQUEST" -> MessageType.IA_REQUEST;
 		case "STARTUP_TEST" -> MessageType.STARTUP_TEST;
-		case "CONNECTION_TEST" -> MessageType.CONNECTION_TEST;
-		default -> MessageType.UNKNOWN;
+		default -> MessageType.PROCESSED;
 		};
 	}
 

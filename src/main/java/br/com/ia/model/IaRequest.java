@@ -1,9 +1,11 @@
 package br.com.ia.model;
 
+import java.io.Serializable;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import br.com.ia.model.enums.ModeloIA;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,14 +16,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class IaRequest {
+public class IaRequest implements Serializable{
 
-	private static final String UNKNOWN = "unknown";
+	private static final long serialVersionUID = 5200498518764653883L;
+	private static final ModeloIA MODELO_IA_DEFAULT = ModeloIA.GPT_5;
 
-	// Constantes para os campos do options Map
-	public static final String TYPE = "type";
 	public static final String API_KEY = "api_key";
-	public static final String MODEL = "model";
+	public static final String MODELO = "modelo";
 	public static final String INSTRUCTIONS = "instructions";
 	public static final String TEMPERATURE = "temperature";
 	public static final String MAX_OUTPUT_TOKENS = "max_output_tokens";
@@ -37,10 +38,7 @@ public class IaRequest {
 	public static final String SHARD_STABLE = "stable";
 	public static final String SHARD_PAYLOAD = "payload";
 
-	public static final String REQUEST_TYPE_COMMAND = "command";
-	public static final String REQUEST_TYPE_TEST = "test";
-
-	private Long requestId;
+	private String correlationId;
 	private String chatId;
 	private String prompt;
 	private Map<String, Object> options;
@@ -59,34 +57,15 @@ public class IaRequest {
 	/**
 	 * Gets the model from options with default fallback
 	 *
-	 * @return Model name or "gpt-5" as default
+	 * @return Modelo name or "gpt-5" as default
 	 */
-	public String getModel() {
-		return options != null ? (String) options.getOrDefault(MODEL, UNKNOWN) : UNKNOWN;
-	}
+	public ModeloIA getModelo() {
 
-	/**
-	 * Gets the temperature from options with default fallback
-	 *
-	 * @return Temperature value or 0.3 as default
-	 */
-	public Double getTemperature() {
-		if (options == null)
-			return 0.3;
-		Object temp = options.get(TEMPERATURE);
-		if (temp instanceof Number numero) {
-			return numero.doubleValue();
+		if (options != null) {
+			String m = (String) options.getOrDefault(MODELO, MODELO_IA_DEFAULT.name());
+			return ModeloIA.from(m);
 		}
-		return 0.3;
+		return MODELO_IA_DEFAULT;
 	}
 
-	/**
-	 * Checks if this is a valid request (has required fields)
-	 *
-	 * @return true if request has chatId, prompt, and api_key
-	 */
-	public boolean isValid() {
-		return chatId != null && !chatId.trim().isEmpty() && prompt != null && !prompt.trim().isEmpty()
-				&& getApiKey() != null && !getApiKey().trim().isEmpty();
-	}
 }

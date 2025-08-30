@@ -64,8 +64,6 @@ public class PromptExecutorImpl implements PromptExecutor {
 		request = otimizarEValidar(request);
 		log.debug("✅ Payload otimizado e validado");
 
-		request.setType(IaRequest.REQUEST_TYPE_COMMAND);
-
 		boolean sent = iaServerClient.sendIaRequest(criarIaRequest(request));
 
 		if (sent) {
@@ -85,19 +83,26 @@ public class PromptExecutorImpl implements PromptExecutor {
 		// Convert ContextShards to the format expected by IAServer
 		List<Map<String, Object>> contextShardsData = new ArrayList<>();
 		for (ContextShard shard : shardsCompleta) {
-			Map<String, Object> shardData = Map.of(IaRequest.SHARD_TYPE, shard.type(), IaRequest.SHARD_VERSION,
-					shard.version(), IaRequest.SHARD_STABLE, shard.stable(), IaRequest.SHARD_PAYLOAD,
-					shard.payload() != null ? shard.payload() : Map.of());
+			Map<String, Object> shardData = Map.of(
+					IaRequest.SHARD_TYPE, shard.type(), 
+					IaRequest.SHARD_VERSION, shard.version(), 
+					IaRequest.SHARD_STABLE, shard.stable(), 
+					IaRequest.SHARD_PAYLOAD, shard.payload() != null ? shard.payload() : Map.of());
 			contextShardsData.add(shardData);
 		}
 
 		// Create options for IaRequest
-		Map<String, Object> options = Map.of(IaRequest.API_KEY, request.getApiKey(), IaRequest.MODEL,
-				request.getModel(), IaRequest.INSTRUCTIONS, request.getInstructions(), IaRequest.TEMPERATURE,
-				normalizeTemperature(request.getTemperaturePercent()), IaRequest.MAX_OUTPUT_TOKENS,
-				request.getMaxOutputTokens(), IaRequest.CONTEXT_SHARDS, contextShardsData, IaRequest.TEXT,
-				request.getSchema(), IaRequest.MODULE_KEY, request.getModuleKey(), IaRequest.VERSAO_SCHEMA,
-				request.getSchemaVersion(), IaRequest.VERSAO_REGRAS_MODULO, request.getInstructions());
+		Map<String, Object> options = Map.of(
+				IaRequest.API_KEY, request.getApiKey(), 
+				IaRequest.INSTRUCTIONS, request.getInstructions(), 
+				IaRequest.TEMPERATURE, normalizeTemperature(request.getTemperatura()), 
+				IaRequest.MAX_OUTPUT_TOKENS, request.getComplexity().getTokens(), 
+				IaRequest.CONTEXT_SHARDS, contextShardsData, 
+				IaRequest.TEXT, request.getSchema(), 
+				IaRequest.MODULE_KEY, request.getModuleKey(), 
+				IaRequest.VERSAO_SCHEMA, request.getSchemaVersion(), 
+				IaRequest.VERSAO_REGRAS_MODULO, request.getInstructions(),
+				IaRequest.MODELO, request.getModelo());
 
 		var req = new IaRequest();
 		req.setChatId(request.getChatId());
@@ -114,7 +119,7 @@ public class PromptExecutorImpl implements PromptExecutor {
 		logIA.setIdChat(request.getChatId());
 		logIA.setPrompt(request.getPrompt());
 		repository.save(logIA);
-		request.setRequestId(logIA.getId());
+		request.setCorrelationId(Long.toString(logIA.getId()));
 	}
 
 	private List<ContextShard> montarContextShards(PromptRequest request) {
@@ -153,8 +158,6 @@ public class PromptExecutorImpl implements PromptExecutor {
 			throw new IAExecutionException("prompt obrigatório");
 		if (isBlank(request.getApiKey()))
 			throw new IAExecutionException("apiKey obrigatório");
-		if (isBlank(request.getModel()))
-			throw new IAExecutionException("model obrigatório");
 		log.debug("✅ Pré-validações concluídas");
 	}
 
@@ -213,12 +216,7 @@ public class PromptExecutorImpl implements PromptExecutor {
 			if (calcularTamanhoPayload(x) <= maxPayloadSize)
 				return x;
 
-			// 5) reduzir tokens de saída
-			x = reduzirMaxOutputTokens(x);
-			if (calcularTamanhoPayload(x) <= maxPayloadSize)
-				return x;
-
-			// 6) poda por prioridade (se configurada)
+			// 5) poda por prioridade (se configurada)
 			x = podarShardsPorPrioridade(x);
 			if (calcularTamanhoPayload(x) <= maxPayloadSize)
 				return x;
@@ -236,8 +234,14 @@ public class PromptExecutorImpl implements PromptExecutor {
 	private PromptRequestPayload buildPayload(PromptRequest req) {
 		// Converte o domínio para DTOs estáveis SOMENTE aqui (fronteira)
 		final var shardDTOs = ContextShardDTOs.copyOf(req.getShards());
-		return new PromptRequestPayload(req.getChatId(), req.getModel(), req.getPrompt(), shardDTOs,
-				req.getMaxOutputTokens(), req.getTemperaturePercent());
+		return new PromptRequestPayload(
+				"ID_000000",
+				req.getChatId(), 
+				req.getModelo().name(), 
+				req.getPrompt(), 
+				shardDTOs,
+				16000, 
+				req.getTemperatura());
 	}
 
 	/** Calcula o tamanho aproximado do payload (via wrapper serializável) */
@@ -357,16 +361,6 @@ public class PromptExecutorImpl implements PromptExecutor {
 			String truncadas = truncarTextoInteligente(original, 3000);
 			r.setInstructions(truncadas);
 			log.debug("Instructions truncadas: {} → {} caracteres", original.length(), truncadas.length());
-		}
-		return r;
-	}
-
-	/** Reduz o número máximo de tokens de saída */
-	private PromptRequest reduzirMaxOutputTokens(PromptRequest r) {
-		if (r.getMaxOutputTokens() > 800) {
-			Integer original = r.getMaxOutputTokens();
-			r.setMaxOutputTokens(800);
-			log.debug("Max output tokens reduzido: {} → {}", original, 800);
 		}
 		return r;
 	}

@@ -52,7 +52,7 @@ public class ResponsesClient {
     } catch (Exception e) {
       throw new IAExecutionException("Falha ao chamar Responses API: " + e.getMessage(), e);
     }
-  }
+  } 
 
   /** Streaming SSE semântico (se quiser usar) */
   public Flux<String> streamResponse(String apiKey, ResponsesRequest req) {

@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @RequiredArgsConstructor
 public class AmbienteUtils {
-
+	
     private static final String SPRING_CLOUD_STREAM_BINDINGS_IA_REPLIES_OUT_0_DESTINATION =
             "spring.cloud.stream.bindings.iaReplies-out-0.destination";
     private static final String SPRING_CLOUD_STREAM_BINDINGS_PROCESS_IA_CONSUMER_IN_0_GROUP =

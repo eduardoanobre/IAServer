@@ -48,4 +48,10 @@ public class ModeloIA implements Serializable {
 	@Column(name = "padrao")
 	private boolean padrao;
 
+	// getters and setters
+
+	public br.com.ia.model.enums.ModeloIA obterEnumModeloIA() {
+		return br.com.ia.model.enums.ModeloIA.from(modelo);
+	}
+
 }
